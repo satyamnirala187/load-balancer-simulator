@@ -10,8 +10,9 @@ class Server:
     weight: int  # relative capacity: connections it serves comfortably
     base_ms: float  # response time when idle
     connections: int = 0  # in-flight requests; only Balancer.acquire/release may change it
-    healthy: bool = True  # False = down
+    healthy: bool = True  # the BALANCER's view (False = down); only Balancer.set_healthy changes it
     slowdown: float = 1.0  # > 1 simulates a degraded server
+    alive: bool = True  # ground truth for fault injection; `healthy` follows it, one health check late
 
     @property
     def max_connections(self):
