@@ -2,9 +2,10 @@
 import random
 from dataclasses import dataclass, field
 
-PATTERNS = ("normal", "spike", "slow_server")
-SPIKE_FACTOR = 4  # Tatkal rush: arrival rate x4 ...
-SPIKE_WINDOW = (0.4, 0.6)  # ... during the middle fifth of the run
+PATTERNS = ("normal", "spike", "slow_server", "burst")
+# surge patterns: name -> (arrival-rate multiplier, (start, end) of the surge as fractions of the run)
+SURGES = {"spike": (4, (0.4, 0.6)),  # Tatkal rush: x4 for the middle fifth of the run
+          "burst": (10, (0.45, 0.55))}  # sudden x10 for the middle tenth
 SLOW_SERVER = {"app-2": 5.0}  # slow_server pattern: app-2 answers 5x slower for the whole run
 
 
@@ -31,6 +32,14 @@ class Scenario:
     duration_ms: float = 0.0  # length of the run (the dashboard's progress bar)
 
 
+def rate_factor(pattern):
+    """Average arrival rate over a run, as a multiple of the base rate (to size a run to N requests)."""
+    if pattern not in SURGES:
+        return 1.0
+    factor, (lo, hi) = SURGES[pattern]
+    return 1 + (factor - 1) * (hi - lo)
+
+
 def make_scenario(pattern, seed=42, duration_s=20, rate=100):
     """Poisson arrivals at `rate` req/s for `duration_s`. Same seed => same arrivals."""
     if pattern not in PATTERNS:
@@ -38,9 +47,10 @@ def make_scenario(pattern, seed=42, duration_s=20, rate=100):
     rng = random.Random(seed)
     end = duration_s * 1000
     segments = [(0, end, rate)]
-    if pattern == "spike":
-        a, b = (end * f for f in SPIKE_WINDOW)
-        segments = [(0, a, rate), (a, b, rate * SPIKE_FACTOR), (b, end, rate)]
+    if pattern in SURGES:
+        factor, (lo, hi) = SURGES[pattern]
+        a, b = end * lo, end * hi
+        segments = [(0, a, rate), (a, b, rate * factor), (b, end, rate)]
     arrivals = []
     for start, stop, r in segments:  # Poisson is memoryless, so restarting per segment is exact
         t = start

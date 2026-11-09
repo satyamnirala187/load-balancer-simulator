@@ -84,13 +84,13 @@ class RunResult:
 class Simulation:
     """One algorithm on one scenario. Event order at equal times: health check, fault, completion, arrival."""
 
-    def __init__(self, algorithm, scenario, check_interval_ms=DEFAULT_INTERVAL_MS):
+    def __init__(self, algorithm, scenario, check_interval_ms=DEFAULT_INTERVAL_MS, passive_after=0):
         self.algorithm = algorithm
         self.requests = scenario.requests
         self.servers = make_servers(scenario.slow)
         self.by_id = {s.id: s for s in self.servers}
         self.lb = algorithm(self.servers)
-        self.checker = HealthChecker(self.lb, check_interval_ms)
+        self.checker = HealthChecker(self.lb, check_interval_ms, passive_after)
         self.interval = check_interval_ms
         self.faults = list(scenario.faults)  # everything ever scheduled, kept for failover()
         self._pending = [(f.at_ms, i, f) for i, f in enumerate(self.faults)]  # heap: (time, seq, Fault)
@@ -164,15 +164,18 @@ class Simulation:
             if s:
                 self.lb.release(s)
             self.records.append(Record(req.id, req.arrival_ms, s and s.id, None, False, why))
+            if why == "refused":  # a passive mark takes effect just after this request, which was already routed
+                self.checker.note_refused(s, math.nextafter(req.arrival_ms, math.inf))
             return
+        self.checker.note_ok(s)
         latency = s.response_ms(req.work)
         heapq.heappush(self._in_flight, (req.arrival_ms + latency, req.id, s))
         self.records.append(Record(req.id, req.arrival_ms, s.id, latency, True))
         self._last_done = max(self._last_done, req.arrival_ms + latency)
 
 
-def simulate(algorithm, scenario, check_interval_ms=DEFAULT_INTERVAL_MS):
-    sim = Simulation(algorithm, scenario, check_interval_ms)
+def simulate(algorithm, scenario, check_interval_ms=DEFAULT_INTERVAL_MS, passive_after=0):
+    sim = Simulation(algorithm, scenario, check_interval_ms, passive_after)
     sim.advance(math.inf)
     return sim.result()
 

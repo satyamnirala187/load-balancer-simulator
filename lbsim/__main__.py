@@ -1,13 +1,13 @@
 """CLI: run the same synthetic traffic through every algorithm and print a comparison.
 
-    python3 -m lbsim [--pattern normal|spike|slow_server|all] [--seed N] [--duration S] [--rate R]
-                     [--kill-server ID --at S [--revive-at S]] [--check-interval S]
+    python3 -m lbsim [--pattern normal|spike|slow_server|burst|all] [--seed N] [--duration S] [--rate R]
+                     [--kill-server ID --at S [--revive-at S]] [--check-interval S] [--passive-after N]
 """
 import argparse
 
 from .algorithms import ALGORITHMS
 from .health import DEFAULT_INTERVAL_MS
-from .report import comparison_table, failover_table, failover_title, load_table
+from .report import comparison_table, failover_table, failover_title, load_table, print_table
 from .servers import FLEET
 from .simulator import simulate
 from .traffic import PATTERNS, Fault, make_scenario
@@ -18,17 +18,7 @@ def seconds(text):
     return float(text.rstrip("s"))
 
 
-def print_table(headers, rows):
-    """First column left-aligned, the rest right-aligned."""
-    cells = [headers] + rows
-    w = [max(len(r[i]) for r in cells) + 2 for i in range(len(headers))]
-    fmt = lambda r: r[0].ljust(w[0]) + "".join(c.rjust(n) for c, n in zip(r[1:], w[1:]))
-    print("\n" + fmt(headers) + "\n" + "-" * len(fmt(headers)))
-    for r in rows:
-        print(fmt(r))
-
-
-def print_comparison(scenario, results, rate, duration, kill=None, interval_ms=DEFAULT_INTERVAL_MS):
+def print_comparison(scenario, results, rate, duration, kill=None, interval_ms=DEFAULT_INTERVAL_MS, passive_after=0):
     print(f"\nRailDhaara Tatkal rush [simulated] | pattern: {scenario.name} | "
           f"base {rate:g} req/s x {duration:g}s | {len(scenario.requests)} requests")
     if scenario.slow:
@@ -36,7 +26,7 @@ def print_comparison(scenario, results, rate, duration, kill=None, interval_ms=D
     print_table(*comparison_table(results))
     print_table(*load_table(results))
     if kill:
-        print("\n" + failover_title(results[0], kill, interval_ms))
+        print("\n" + failover_title(results[0], kill, interval_ms, passive_after=passive_after))
         print_table(*failover_table(results, kill))
 
 
@@ -52,9 +42,13 @@ def main(argv=None):
     p.add_argument("--revive-at", type=seconds, metavar="S", help="when to bring it back, e.g. 15s")
     p.add_argument("--check-interval", type=seconds, default=DEFAULT_INTERVAL_MS / 1000, metavar="S",
                    help="seconds between health checks (default 0.5s)")
+    p.add_argument("--passive-after", type=int, default=0, metavar="N",
+                   help="also mark a server down after N refused requests in a row (default 0 = off)")
     a = p.parse_args(argv)
     if a.duration <= 0 or a.rate <= 0 or a.check_interval <= 0:
         p.error("--duration, --rate and --check-interval must be positive")
+    if a.passive_after < 0:
+        p.error("--passive-after must be 0 (off) or a positive count")
     if a.kill_server:
         if a.at is None:
             p.error("--kill-server needs --at")
@@ -71,8 +65,8 @@ def main(argv=None):
             if a.revive_at is not None:
                 scenario.faults.append(Fault(a.revive_at * 1000, a.kill_server, True))
         interval_ms = a.check_interval * 1000
-        results = [simulate(alg, scenario, interval_ms) for alg in ALGORITHMS]
-        print_comparison(scenario, results, a.rate, a.duration, a.kill_server, interval_ms)
+        results = [simulate(alg, scenario, interval_ms, a.passive_after) for alg in ALGORITHMS]
+        print_comparison(scenario, results, a.rate, a.duration, a.kill_server, interval_ms, a.passive_after)
 
 
 if __name__ == "__main__":

@@ -7,6 +7,16 @@ import math
 from .simulator import failover
 
 
+def print_table(headers, rows, left=1):
+    """Print a (headers, rows) table: the first `left` columns left-aligned, the rest right-aligned."""
+    cells = [headers] + rows
+    w = [max(len(r[i]) for r in cells) + 2 for i in range(len(headers))]
+    fmt = lambda r: "".join(c.ljust(n) if i < left else c.rjust(n) for i, (c, n) in enumerate(zip(r, w)))
+    print("\n" + fmt(headers) + "\n" + "-" * len(fmt(headers)))
+    for r in rows:
+        print(fmt(r))
+
+
 def secs(ms, never="never"):
     return never if math.isinf(ms) else f"{ms / 1000:g}s"
 
@@ -31,12 +41,13 @@ def failover_table(results, server_id):
               "n/a" if x.ok_while_down is None else f"{100 * x.ok_while_down:.1f}%"] for a, x in fo])
 
 
-def failover_title(result, server_id, interval_ms, never="never"):
+def failover_title(result, server_id, interval_ms, never="never", passive_after=0):
     """One line with the times. They depend on the scenario and check interval, not on the algorithm.
     `never` is what to print for something that has not happened (a live run says "not yet")."""
     f = failover(result, server_id)
+    passive = f", or after {passive_after} refused requests" if passive_after else ""
     return (f"Failover: {server_id} killed at {secs(f.kill_ms)}, marked down at {secs(f.detect_ms, never)} "
-            f"(health check every {interval_ms:g} ms), revived at {secs(f.revive_ms, never)}, "
+            f"(health check every {interval_ms:g} ms{passive}), revived at {secs(f.revive_ms, never)}, "
             f"back in rotation at {secs(f.recover_ms, never)}")
 
 

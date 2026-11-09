@@ -58,7 +58,8 @@ class DashboardTest(unittest.TestCase):
         at, run, clock = open_app()
         self.assertEqual(list(at.exception), [])
         self.assertEqual([s.label for s in at.selectbox], ["Pattern", "Algorithm (live view)", "Server"])
-        self.assertEqual(at.selectbox[0].options, ["Normal load", "Sudden spike (Tatkal rush)", "One slow server"])
+        self.assertEqual(at.selectbox[0].options, ["Normal load", "Sudden spike (Tatkal rush)", "One slow server",
+                                                   "Sudden 10x burst"])
         self.assertEqual(at.selectbox[1].options, NAMES)
         self.assertEqual(at.radio[0].options, ["Live view", "Compare all 3"])
         self.assertEqual({b.key: b.disabled for b in at.button},
@@ -70,7 +71,7 @@ class DashboardTest(unittest.TestCase):
         at, run, clock = open_app()
         for view in ("Live view", "Compare all 3"):
             at.radio[0].set_value(view)
-            for pattern in ("normal", "spike", "slow_server"):
+            for pattern in ("normal", "spike", "slow_server", "burst"):
                 at.selectbox[0].set_value(pattern)  # AppTest takes the raw value, the page shows the label
                 for name in NAMES:
                     at.selectbox[1].set_value(name).run()
@@ -110,6 +111,33 @@ class DashboardTest(unittest.TestCase):
         self.assertEqual(recent.loc["app-3", "state"], "up")
         self.assertGreater(recent.loc["app-3", "count"], 0)  # traffic came back
         self.assertEqual(metric(at, "Sent to a marked-down server"), "0")
+
+    def test_narrow_screen_and_light_theme_fixes_stay_in_place(self):
+        # found in the browser at 390 px / light theme: no hint that the controls hide in the sidebar, line-chart
+        # legends clipped at the right edge, a pale-blue line that vanished on white. (Layout itself needs a browser.)
+        at, run, clock = open_app()
+        at.button(key="start").click().run()
+        clock.t = 40.0
+        at.run()
+        at.radio[0].set_value("Compare all 3").run()
+        hint = [m.value for m in at.markdown if "mobile-hint" in m.value]
+        self.assertEqual(len(hint), 1)
+        self.assertIn("@media (max-width:640px)", hint[0])  # shown only on narrow screens
+        self.assertIn("sidebar", hint[0])
+
+        lines = 0
+        for el in at.main:
+            if getattr(el, "type", None) != "vega_lite_chart":
+                continue
+            spec = json.loads(el.proto.spec)
+            mark = spec["mark"]["type"] if isinstance(spec["mark"], dict) else spec["mark"]
+            if mark != "line":
+                continue
+            lines += 1
+            color = spec["encoding"]["color"]
+            self.assertEqual(color["legend"]["columns"], 1)  # one entry per row: three names do not fit in a row at 390 px
+            self.assertEqual(len(color["scale"]["domain"]), len(color["scale"]["range"]))  # explicit, theme-safe colours
+        self.assertEqual(lines, 2)  # latency and throughput
 
     def test_no_stray_values_are_printed_on_the_page(self):
         # Streamlit "magic" prints bare expressions, so a stray `a() if c else b()` shows a literal `None`
