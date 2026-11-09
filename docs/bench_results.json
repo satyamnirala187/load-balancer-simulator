@@ -1,0 +1,71 @@
+{
+  "machine": {
+    "python": "3.14.3",
+    "platform": "macOS-27.2-arm64-arm-64bit-Mach-O",
+    "processor": "arm"
+  },
+  "heap_vs_linear": [
+    {
+      "servers": 5,
+      "heap_us": 0.74,
+      "linear_us": 0.5,
+      "linear_over_heap": 0.68
+    },
+    {
+      "servers": 15,
+      "heap_us": 0.95,
+      "linear_us": 0.88,
+      "linear_over_heap": 0.93
+    },
+    {
+      "servers": 20,
+      "heap_us": 1.06,
+      "linear_us": 1.09,
+      "linear_over_heap": 1.03
+    },
+    {
+      "servers": 50,
+      "heap_us": 1.27,
+      "linear_us": 2.22,
+      "linear_over_heap": 1.74
+    },
+    {
+      "servers": 500,
+      "heap_us": 1.95,
+      "linear_us": 19.13,
+      "linear_over_heap": 9.81
+    },
+    {
+      "servers": 5000,
+      "heap_us": 2.89,
+      "linear_us": 185.87,
+      "linear_over_heap": 64.39
+    },
+    {
+      "servers": 50000,
+      "heap_us": 6.0,
+      "linear_us": 1862.53,
+      "linear_over_heap": 310.22
+    }
+  ],
+  "per_request": [
+    {
+      "requests": 951,
+      "Round Robin": 2.33,
+      "Least Connections": 3.25,
+      "Weighted Least Conn.": 3.28
+    },
+    {
+      "requests": 10001,
+      "Round Robin": 2.23,
+      "Least Connections": 3.28,
+      "Weighted Least Conn.": 3.28
+    },
+    {
+      "requests": 99855,
+      "Round Robin": 2.28,
+      "Least Connections": 3.31,
+      "Weighted Least Conn.": 3.37
+    }
+  ]
+}

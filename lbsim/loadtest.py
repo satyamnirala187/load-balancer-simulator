@@ -30,6 +30,29 @@ def span(values, fmt):
     return f"{fmt(min(values))} - {fmt(max(values))}"
 
 
+def tables(sizes, rate, seed, seeds):
+    """-> (load rows, stability rows, number of simulations). Rows are lists of ready-to-print strings."""
+    load, stable, runs = [], [], 0
+    for pattern in PATTERNS:
+        for n in sizes:
+            per_seed = [run(pattern, n, seed + i, rate)[1] for i in range(seeds)]
+            runs += seeds * len(ALGORITHMS)
+            for j in range(len(ALGORITHMS)):
+                r = per_seed[0][j]
+                _, (row,) = comparison_table([r])
+                load.append([pattern, f"{n:,}", r.algorithm, f"{r.total:,}"] + row[1:] +
+                            [f"{100 * r.failed / r.total:.1f}%" if r.total else "-"])
+                across = [res[j] for res in per_seed]
+                stable.append([pattern, f"{n:,}", r.algorithm,
+                               span([s.requests_per_sec for s in across], lambda v: f"{v:.1f}"),
+                               span([s.avg_latency_ms for s in across], lambda v: f"{v:.1f}"),
+                               span([100 * s.failed / s.total for s in across], lambda v: f"{v:.1f}%")])
+    return load, stable, runs
+
+
+LOAD_HEADERS = ["Pattern", "Size", "Algorithm", "requests", "req/s", "avg ms", "max ms", "failed", "failed %"]
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="python3 -m lbsim.loadtest", description=__doc__.split("\n")[0])
     p.add_argument("--sizes", type=int, nargs="+", default=[1000, 10000], metavar="N", help="requests per run")
@@ -41,24 +64,9 @@ def main(argv=None):
         p.error("--sizes and --rate must be positive and --seeds at least 1")
 
     started = time.perf_counter()
-    load, stable, runs = [], [], 0
-    for pattern in PATTERNS:
-        for n in a.sizes:
-            per_seed = [run(pattern, n, a.seed + i, a.rate)[1] for i in range(a.seeds)]
-            runs += a.seeds * len(ALGORITHMS)
-            for j, alg in enumerate(ALGORITHMS):
-                r = per_seed[0][j]
-                _, (row,) = comparison_table([r])
-                load.append([pattern, f"{n:,}", r.algorithm, f"{r.total:,}"] + row[1:] +
-                            [f"{100 * r.failed / r.total:.1f}%" if r.total else "-"])
-                seeds = [res[j] for res in per_seed]
-                stable.append([pattern, f"{n:,}", r.algorithm,
-                               span([s.requests_per_sec for s in seeds], lambda v: f"{v:.1f}"),
-                               span([s.avg_latency_ms for s in seeds], lambda v: f"{v:.1f}"),
-                               span([100 * s.failed / s.total for s in seeds], lambda v: f"{v:.1f}%")])
+    load, stable, runs = tables(a.sizes, a.rate, a.seed, a.seeds)
     print(f"Load runs: base {a.rate:g} req/s, sizes {', '.join(f'{n:,}' for n in a.sizes)}, seed {a.seed}")
-    print_table(["Pattern", "Size", "Algorithm", "requests", "req/s", "avg ms", "max ms", "failed", "failed %"],
-                load, left=3)
+    print_table(LOAD_HEADERS, load, left=3)
     if a.seeds > 1:
         print(f"\nStability: min - max across {a.seeds} seeds ({a.seed} to {a.seed + a.seeds - 1})")
         print_table(["Pattern", "Size", "Algorithm", "req/s", "avg ms", "failed %"], stable, left=3)

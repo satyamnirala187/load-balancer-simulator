@@ -101,6 +101,27 @@ class LiveRunTest(unittest.TestCase):
         with self.assertRaises(KeyError):
             run.kill("app-9")
 
+    def test_revive_while_paused_waits_for_the_next_check_then_resumes(self):
+        # the demo's flow: kill, pause to talk, revive on the frozen screen, resume
+        run, clock = self.new("spike")
+        run.start()
+        clock.t = 9.0
+        self.assertTrue(run.kill("app-3"))
+        clock.t = 14.5
+        run.pause()
+        server = run.sims["Weighted Least Conn."].by_id["app-3"]
+        self.assertEqual((server.alive, server.healthy), (False, False))  # dead and already marked down
+        self.assertTrue(run.revive("app-3"))  # allowed while paused
+        self.assertEqual((server.alive, server.healthy), (True, False))  # alive, not back in rotation yet
+        self.assertEqual(run.now_ms, 14500)  # the clock did not move
+        run.start()
+        clock.t += 0.6
+        run.tick()
+        self.assertEqual((server.alive, server.healthy), (True, True))  # the next check put it back
+        drive(run, clock)
+        for r in run.results():
+            self.assertEqual(routed_while_marked_down(r), 0, r.algorithm)
+
     def test_pause_freezes_the_clock_and_speed_scales_it(self):
         run, clock = self.new(speed=4)
         run.start()

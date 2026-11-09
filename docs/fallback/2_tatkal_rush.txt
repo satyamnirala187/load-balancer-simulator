@@ -1,0 +1,15 @@
+$ python3 -m lbsim --pattern spike
+
+RailDhaara Tatkal rush [simulated] | pattern: spike | base 100 req/s x 20s | 3131 requests
+
+Algorithm               req/s  avg ms  max ms  failed
+-----------------------------------------------------
+Round Robin             140.2   109.6   357.2     307
+Least Connections       144.9    95.8   358.5     224
+Weighted Least Conn.    154.8   110.1   359.3      17
+
+Load: requests handled    app-1 (w8)  app-2 (w6)  app-3 (w5)  app-4 (w4)  app-5 (w3)
+------------------------------------------------------------------------------------
+Round Robin                      627         626         596         506         469
+Least Connections                922         690         560         407         328
+Weighted Least Conn.            1092         752         578         385         307
