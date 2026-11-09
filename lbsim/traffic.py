@@ -15,11 +15,19 @@ class Request:
     work: float  # relative cost of this request (1.0 = average)
 
 
+@dataclass(frozen=True)
+class Fault:
+    at_ms: float
+    server_id: str
+    alive: bool  # False = the server dies at at_ms, True = it comes back
+
+
 @dataclass
 class Scenario:
     name: str
     requests: list
     slow: dict = field(default_factory=dict)  # server id -> slowdown factor
+    faults: list = field(default_factory=list)  # Fault events, any order
 
 
 def make_scenario(pattern, seed=42, duration_s=20, rate=100):
