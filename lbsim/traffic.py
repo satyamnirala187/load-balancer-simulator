@@ -28,6 +28,7 @@ class Scenario:
     requests: list
     slow: dict = field(default_factory=dict)  # server id -> slowdown factor
     faults: list = field(default_factory=list)  # Fault events, any order
+    duration_ms: float = 0.0  # length of the run (the dashboard's progress bar)
 
 
 def make_scenario(pattern, seed=42, duration_s=20, rate=100):
@@ -46,4 +47,5 @@ def make_scenario(pattern, seed=42, duration_s=20, rate=100):
         while (t := t + rng.expovariate(r / 1000)) < stop:
             arrivals.append(t)
     requests = [Request(i, t, rng.uniform(0.5, 1.5)) for i, t in enumerate(arrivals)]
-    return Scenario(pattern, requests, dict(SLOW_SERVER) if pattern == "slow_server" else {})
+    return Scenario(pattern, requests, dict(SLOW_SERVER) if pattern == "slow_server" else {},
+                    duration_ms=end)

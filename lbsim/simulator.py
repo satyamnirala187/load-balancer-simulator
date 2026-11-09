@@ -15,12 +15,13 @@ are not idempotent, so cutting them off and auto-retrying risks a double booking
 Requests sent to the dead server before the checker notices are refused and counted as failed;
 shortcut: they are not retried (that would be safe, since the server never processed them, but it
 would hide the cost of the detection delay).
+
+Simulation is steppable (advance(t) any number of times, inject() faults while it runs), so the
+dashboard can drive it live. simulate() is just "advance to the end"; both give identical records.
 """
 import heapq
 import math
-from collections import deque
 from dataclasses import dataclass
-from functools import partial
 
 from .health import DEFAULT_INTERVAL_MS, HealthChecker
 from .servers import make_servers
@@ -43,7 +44,7 @@ class RunResult:
     servers: list  # final server state (ids and weights, for reporting)
     duration_ms: float  # first arrival -> last completion
     health_log: list  # (time_ms, server_id, healthy) for each change the health checker made
-    faults: list  # the scenario's Fault events
+    faults: list  # every Fault scheduled or injected
 
     @property
     def total(self):
@@ -80,46 +81,100 @@ class RunResult:
         return counts
 
 
-def simulate(algorithm, scenario, check_interval_ms=DEFAULT_INTERVAL_MS):
-    servers = make_servers(scenario.slow)
-    by_id = {s.id: s for s in servers}
-    lb = algorithm(servers)
-    checker = HealthChecker(lb, check_interval_ms)
+class Simulation:
+    """One algorithm on one scenario. Event order at equal times: health check, fault, completion, arrival."""
 
-    # Control events on the virtual clock. At the same instant a health check runs BEFORE a fault, so a
-    # server killed at t is first noticed one full interval later: detection delay is in (0, interval].
-    events = [(f.at_ms, 1, partial(setattr, by_id[f.server_id], "alive", f.alive)) for f in scenario.faults]
-    if scenario.requests:
-        ticks = int(scenario.requests[-1].arrival_ms // check_interval_ms)
-        events += [(k * check_interval_ms, 0, partial(checker.check, k * check_interval_ms))
-                   for k in range(1, ticks + 1)]
-    events = deque(sorted(events, key=lambda e: e[:2]))
+    def __init__(self, algorithm, scenario, check_interval_ms=DEFAULT_INTERVAL_MS):
+        self.algorithm = algorithm
+        self.requests = scenario.requests
+        self.servers = make_servers(scenario.slow)
+        self.by_id = {s.id: s for s in self.servers}
+        self.lb = algorithm(self.servers)
+        self.checker = HealthChecker(self.lb, check_interval_ms)
+        self.interval = check_interval_ms
+        self.faults = list(scenario.faults)  # everything ever scheduled, kept for failover()
+        self._pending = [(f.at_ms, i, f) for i, f in enumerate(self.faults)]  # heap: (time, seq, Fault)
+        heapq.heapify(self._pending)
+        self._seq = len(self._pending)
+        self._tick = 1  # next health check is at _tick * interval
+        self._next_req = 0
+        self._in_flight = []  # heap of (finish_ms, request_id, server)
+        self.records = []
+        self.now = 0.0  # everything at or before this time has been processed
+        self._last_done = 0.0
 
-    in_flight = []  # heap of (finish_ms, request_id, server)
-    records = []
-    last_done = 0.0
-    for req in scenario.requests:
-        while events and events[0][0] <= req.arrival_ms:
-            events.popleft()[2]()
-        while in_flight and in_flight[0][0] <= req.arrival_ms:
-            lb.release(heapq.heappop(in_flight)[2])
-        s = lb.acquire()
+    def inject(self, fault):
+        """Schedule a fault now or later (e.g. a dashboard button press). Not in the past."""
+        if fault.at_ms < self.now:
+            raise ValueError("cannot inject a fault in the past")
+        self.faults.append(fault)
+        heapq.heappush(self._pending, (fault.at_ms, self._seq, fault))
+        self._seq += 1
+
+    @property
+    def finished(self):
+        return self._next_event() is None
+
+    def advance(self, to_ms):
+        """Process every event up to and including virtual time to_ms (math.inf = run to the end)."""
+        while (e := self._next_event()) is not None and e[0] <= to_ms:
+            self.now = e[0]
+            e[2]()
+        if to_ms != math.inf:
+            self.now = max(self.now, to_ms)
+
+    def result(self):
+        """Snapshot so far; after the last event it is the final result."""
+        start = self.requests[0].arrival_ms if self.requests else 0.0
+        return RunResult(self.algorithm.name, list(self.records), self.servers,
+                         max(self._last_done - start, 0.0), list(self.checker.log), list(self.faults))
+
+    def _next_event(self):
+        """(time, priority, handler) of the earliest pending event, or None when nothing is left."""
+        c = []
+        # health checks only run while traffic is still arriving
+        if self.requests and self._tick * self.interval <= self.requests[-1].arrival_ms:
+            c.append((self._tick * self.interval, 0, self._health_check))
+        if self._pending:
+            c.append((self._pending[0][0], 1, self._fault))
+        if self._in_flight:
+            c.append((self._in_flight[0][0], 2, self._finish))
+        if self._next_req < len(self.requests):
+            c.append((self.requests[self._next_req].arrival_ms, 3, self._arrive))
+        return min(c, key=lambda e: e[:2], default=None)
+
+    def _health_check(self):
+        self.checker.check(self._tick * self.interval)
+        self._tick += 1
+
+    def _fault(self):
+        f = heapq.heappop(self._pending)[2]
+        self.by_id[f.server_id].alive = f.alive
+
+    def _finish(self):
+        self.lb.release(heapq.heappop(self._in_flight)[2])
+
+    def _arrive(self):
+        req = self.requests[self._next_req]
+        self._next_req += 1
+        s = self.lb.acquire()
         why = ("no healthy server" if s is None else "refused" if not s.alive
                else "overloaded" if s.connections > s.max_connections else None)
         if why:
             if s:
-                lb.release(s)
-            records.append(Record(req.id, req.arrival_ms, s and s.id, None, False, why))
-            continue
+                self.lb.release(s)
+            self.records.append(Record(req.id, req.arrival_ms, s and s.id, None, False, why))
+            return
         latency = s.response_ms(req.work)
-        heapq.heappush(in_flight, (req.arrival_ms + latency, req.id, s))
-        records.append(Record(req.id, req.arrival_ms, s.id, latency, True))
-        last_done = max(last_done, req.arrival_ms + latency)
-    while in_flight:
-        lb.release(heapq.heappop(in_flight)[2])
-    start = scenario.requests[0].arrival_ms if scenario.requests else 0.0
-    return RunResult(algorithm.name, records, servers, max(last_done - start, 0.0),
-                     checker.log, list(scenario.faults))
+        heapq.heappush(self._in_flight, (req.arrival_ms + latency, req.id, s))
+        self.records.append(Record(req.id, req.arrival_ms, s.id, latency, True))
+        self._last_done = max(self._last_done, req.arrival_ms + latency)
+
+
+def simulate(algorithm, scenario, check_interval_ms=DEFAULT_INTERVAL_MS):
+    sim = Simulation(algorithm, scenario, check_interval_ms)
+    sim.advance(math.inf)
+    return sim.result()
 
 
 @dataclass
@@ -132,7 +187,7 @@ class Failover:
     refused: int  # sent to it after it died but before the checker noticed
     while_down: int  # sent to it while marked down: should always be 0
     after: int  # requests it served after being put back
-    ok_while_down: float  # success rate of ALL traffic while it was marked down
+    ok_while_down: float  # success rate of ALL traffic while it was marked down; None if there was none
 
 
 def failover(result, server_id):
@@ -150,4 +205,16 @@ def failover(result, server_id):
         refused=sum(r.error == "refused" for r in on_it),
         while_down=sum(detect <= r.arrival_ms < recover for r in on_it),
         after=sum(r.ok and r.arrival_ms >= recover for r in on_it),
-        ok_while_down=sum(r.ok for r in down) / len(down) if down else 1.0)
+        ok_while_down=sum(r.ok for r in down) / len(down) if down else None)
+
+
+def routed_while_marked_down(result):
+    """Requests sent to a server during any period the health checker had it marked down. Must be 0."""
+    spans, down_since = [], {}
+    for t, sid, up in result.health_log:
+        if not up:
+            down_since[sid] = t
+        elif sid in down_since:
+            spans.append((sid, down_since.pop(sid), t))
+    spans += [(sid, t, math.inf) for sid, t in down_since.items()]
+    return sum(a <= r.arrival_ms < b for r in result.records for sid, a, b in spans if r.server_id == sid)
