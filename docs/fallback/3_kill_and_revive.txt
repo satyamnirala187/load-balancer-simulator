@@ -1,0 +1,23 @@
+$ python3 -m lbsim --pattern spike --kill-server app-3 --at 9s --revive-at 14.5s
+
+RailDhaara Tatkal rush [simulated] | pattern: spike | base 100 req/s x 20s | 3131 requests
+
+Algorithm               req/s  avg ms  max ms  failed
+-----------------------------------------------------
+Round Robin             134.7   110.7   358.4     422
+Least Connections       130.8    91.3   357.2     506
+Weighted Least Conn.    141.4   106.0   357.6     288
+
+Load: requests handled    app-1 (w8)  app-2 (w6)  app-3 (w5)  app-4 (w4)  app-5 (w3)
+------------------------------------------------------------------------------------
+Round Robin                      690         682         325         535         477
+Least Connections                893         687         306         405         334
+Weighted Least Conn.            1079         744         313         396         311
+
+Failover: app-3 killed at 9s, marked down at 9.5s (health check every 500 ms), revived at 14.5s, back in rotation at 15s
+
+Failover: app-3         served before kill  refused (undetected)  routed while marked down  served after recovery  success % while marked down
+----------------------------------------------------------------------------------------------------------------------------------------------
+Round Robin                            229                    43                         0                     96                        78.6%
+Least Connections                      217                   179                         0                     89                        78.7%
+Weighted Least Conn.                   222                   172                         0                     91                        90.9%

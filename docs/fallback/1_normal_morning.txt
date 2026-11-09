@@ -1,0 +1,15 @@
+$ python3 -m lbsim 
+
+RailDhaara Tatkal rush [simulated] | pattern: normal | base 100 req/s x 20s | 1957 requests
+
+Algorithm               req/s  avg ms  max ms  failed
+-----------------------------------------------------
+Round Robin              97.6    77.9   237.1       0
+Least Connections        97.6    64.2   158.0       0
+Weighted Least Conn.     97.6    62.8   149.9       0
+
+Load: requests handled    app-1 (w8)  app-2 (w6)  app-3 (w5)  app-4 (w4)  app-5 (w3)
+------------------------------------------------------------------------------------
+Round Robin                      392         392         391         391         391
+Least Connections                613         469         371         267         237
+Weighted Least Conn.             655         480         366         250         206
