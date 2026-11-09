@@ -7,7 +7,7 @@ from lbsim.algorithms import ALGORITHMS, LeastConnections
 from lbsim.health import HealthChecker
 from lbsim.servers import Server
 from lbsim.simulator import failover, simulate
-from lbsim.traffic import Fault, make_scenario
+from lbsim.traffic import PATTERNS, Fault, make_scenario
 
 KILL, REVIVE = 5200, 8200  # ms; with 500 ms checks the server is noticed at 5500 and back at 8500
 DETECT, RECOVER = 5500, 8500
@@ -111,7 +111,8 @@ class CliTest(unittest.TestCase):
 
     def test_every_table_lists_all_three_algorithms(self):
         kill = ("--kill-server", "app-3", "--at", "4s", "--revive-at", "7s")
-        for args, expected in [(kill, 9), ((), 6)]:  # 3 patterns x (comparison, load[, failover])
+        for args, tables_each in [(kill, 3), ((), 2)]:  # per pattern: comparison, load[, failover]
+            expected = tables_each * len(PATTERNS)
             out = run_cli("--pattern", "all", "--duration", "10", *args)
             tables = self.tables(out)
             self.assertEqual(len(tables), expected)

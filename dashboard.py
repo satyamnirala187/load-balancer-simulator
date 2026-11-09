@@ -16,9 +16,13 @@ from lbsim.servers import FLEET
 from lbsim.simulator import routed_while_marked_down
 from lbsim.traffic import make_scenario
 
-PATTERNS = {"normal": "Normal load", "spike": "Sudden spike (Tatkal rush)", "slow_server": "One slow server"}
+PATTERNS = {"normal": "Normal load", "spike": "Sudden spike (Tatkal rush)", "slow_server": "One slow server",
+            "burst": "Sudden 10x burst"}
 VIEWS = ["Live view", "Compare all 3"]
 REFRESH_S = 0.5
+# line colours picked to keep >= 3:1 contrast on both the light and the dark theme
+SERIES_COLOR = {"Round Robin": "#d97706", "Least Connections": "#4c78a8", "Weighted Least Conn.": "#2f9e44",
+                "served": "#4c78a8", "failed": "#e45756", "avg latency (ms)": "#4c78a8"}
 STATE_COLOR = {"up": "#4c78a8", "dead, not detected": "#f58518", "marked down": "#e45756", "alive, not back yet": "#b79a20"}
 STATE_LABEL = {"up": "🟢 up", "dead, not detected": "🟠 dead, not detected yet",
                "marked down": "🔴 marked down", "alive, not back yet": "🟡 alive, not back yet"}
@@ -53,7 +57,9 @@ def lines(columns, t, y_title):
     df = df.reset_index().melt("second", var_name="series", value_name="value")
     chart = alt.Chart(df).mark_line().encode(
         x=alt.X("second:Q", title="simulated seconds"), y=alt.Y("value:Q", title=y_title, scale=alt.Scale(zero=True)),
-        color=alt.Color("series:N", title=None, legend=alt.Legend(orient="bottom")), tooltip=["second", "series", "value"])
+        color=alt.Color("series:N", title=None, legend=alt.Legend(orient="bottom", columns=1),
+                        scale=alt.Scale(domain=list(columns), range=[SERIES_COLOR[c] for c in columns])),
+        tooltip=["second", "series", "value"])
     st.altair_chart(chart.properties(height=240), width="stretch")
 
 
@@ -193,5 +199,10 @@ with st.sidebar:
 
 st.title("RailDhaara load balancer simulator")
 st.caption("A fictional Indian Railways-style booking site under a Tatkal-style rush. Simulated servers and traffic only.")
+# On a phone the sidebar starts collapsed and the controls live in it, so say so (hidden on wider screens)
+st.markdown("<style>.mobile-hint{display:none}@media (max-width:640px){.mobile-hint{display:block;padding:.5rem .75rem;"
+            "border-radius:.5rem;background:rgba(128,128,128,.15);font-size:.9rem}}</style>"
+            "<div class='mobile-hint'>Controls (Start, Kill, Revive) are in the sidebar: tap <b>&raquo;</b> at the top left.</div>",
+            unsafe_allow_html=True)
 view = st.radio("View", VIEWS, horizontal=True, label_visibility="collapsed")
 st.fragment(panel, run_every=REFRESH_S if run.running else None)(run, view, algo, run.running)
