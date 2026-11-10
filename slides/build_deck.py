@@ -7,12 +7,14 @@ Every figure on a slide comes from lbsim.facts (computed from the simulator), do
 short list of structural constants in STRUCTURAL below. tests/test_docs.py rebuilds the numbers and fails if the
 saved deck disagrees, so after changing code or docs: rebuild the deck.
 """
+import io
 import os
 import re
 import sys
 import unittest
 
 from lxml import etree
+from PIL import Image
 from pptx import Presentation
 from pptx.chart.data import CategoryChartData
 from pptx.dml.color import RGBColor
@@ -33,6 +35,10 @@ from lbsim.traffic import make_scenario  # noqa: E402
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "RailDhaara_LoadBalancer.pptx")
 SHOT = os.path.join(ROOT, "docs", "screenshots", "01_live_view_after_kill.png")
+# The capture ends mid-way through the two line charts, and a plain crop above them still slices the sidebar's help text.
+# Row 1108 is blank in BOTH columns: below the Kill/Revive buttons and above their help text (sidebar), and below the bar
+# charts and above their legends (main area). The file in docs/ stays the full capture.
+SHOT_KEEP_PX = 1108
 REPO = "github.com/satyamnirala187/load-balancer-simulator"
 PARTNER = "Raghav Sihag"
 
@@ -469,17 +475,28 @@ def slide_failover(prs, layout, N, charts):
     return s
 
 
+def cropped_shot():
+    """-> (PNG stream, width / height) of the live-view screenshot without its cut-off bottom edge."""
+    img = Image.open(SHOT)
+    img = img.crop((0, 0, img.width, SHOT_KEEP_PX))
+    stream = io.BytesIO()
+    img.save(stream, "PNG")
+    stream.seek(0)
+    return stream, img.width / img.height
+
+
 def slide_dashboard(prs, layout):
     s = new_slide(prs, layout, "Watch the failover live", notes=(
         "About 0:10, then switch to the browser. The dashboard runs the same engine as the command line, so the same seed gives the same "
         "numbers; there is a test for that. Kill and Revive take effect at the simulated moment you click.\n"
         "Fallback: docs/fallback/ has the command-line tables and docs/screenshots/ has these screenshots."))
     pic_w = 7.45
-    pic = s.shapes.add_picture(SHOT, Inches(W - LEFT - pic_w), Inches(1.65), width=Inches(pic_w))
+    stream, aspect = cropped_shot()
+    pic = s.shapes.add_picture(stream, Inches(W - LEFT - pic_w), Inches(1.65), width=Inches(pic_w))
     pic.line.color.rgb = RGBColor(0xC9, 0xD1, 0xE0)
     pic.line.width = Pt(1)
     alt(pic, "Dashboard Live view during a Tatkal-rush run: app-3 is marked down, its bar has dropped to zero and the others carry its load.")
-    text(s, W - LEFT - pic_w, 1.65 + pic_w * 1350 / 2160 + 0.1, pic_w, 0.3,
+    text(s, W - LEFT - pic_w, 1.65 + pic_w / aspect + 0.1, pic_w, 0.3,
          "One live run: Tatkal rush, app-3 killed at 9.6 s. Counts differ from the tables, which use fixed scenarios.",
          size=11, color="dk2")
     items = [("Live view", "Per-server status, load in the last 5 s, open connections, latency and throughput."),
