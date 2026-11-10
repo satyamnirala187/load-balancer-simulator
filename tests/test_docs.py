@@ -26,6 +26,11 @@ try:
 except ImportError:
     Presentation = None
 
+try:
+    from pypdf import PdfReader
+except ImportError:
+    PdfReader = None
+
 
 def read(*parts):
     return ROOT.joinpath(*parts).read_text()
@@ -111,6 +116,48 @@ class TablesInDocsTest(unittest.TestCase):
             self.assertEqual(start, end)  # contiguous
             end = start + int(m2) * 60 + int(s2)
         self.assertEqual(end, 12 * 60)
+
+
+def complexity_figures():
+    """The benchmark-derived figures docs/COMPLEXITY quotes, recomputed from docs/bench_results.json through lbsim.facts."""
+    bench = facts.bench()
+    rows = bench["heap_vs_linear"]
+    hv = {r["servers"]: r for r in rows}
+    lo = max(r["servers"] for r in rows if r["linear_over_heap"] < 1)  # the scan still wins here
+    hi = min(r["servers"] for r in rows if r["linear_over_heap"] >= 1)  # the heap wins from here
+    per_request, heap_variants = bench["per_request"], (LC, WLC)
+    prose = [f"{hv[5]['linear_us']:.2f}", f"{hv[5]['heap_us']:.2f}", f"between {lo} and {hi} servers",
+             f"{hv[50000]['linear_over_heap']:.0f} times faster", f"{hv[50000]['heap_us'] / hv[5]['heap_us']:.1f}-fold",
+             f"{min(r[RR] for r in per_request):.1f} to {max(r[RR] for r in per_request):.1f}",
+             f"{min(r[n] for r in per_request for n in heap_variants):.1f} to {max(r[n] for r in per_request for n in heap_variants):.1f}"]
+    cells = [c for r in rows for c in (f"{r['servers']:,}", f"{r['heap_us']:.2f}", f"{r['linear_us']:.2f}", f"{r['linear_over_heap']:.2f}")]
+    table = facts.md(["servers", "heap, µs per operation", "linear scan, µs per operation", "scan ÷ heap"],
+                     [[f"{r['servers']:,}", f"{r['heap_us']:.2f}", f"{r['linear_us']:.2f}", f"{r['linear_over_heap']:.2f}"] for r in rows])
+    return prose, cells, table
+
+
+class ComplexityDocTest(unittest.TestCase):
+    def test_complexity_markdown_quotes_the_measured_figures(self):
+        prose, _, table = complexity_figures()
+        text = read("docs", "COMPLEXITY.md")
+        self.assertIn(table, text, "docs/COMPLEXITY.md benchmark table is stale: python3 docs/bench.py, then regenerate")
+        hv = {r["servers"]: r for r in facts.bench()["heap_vs_linear"]}
+        self.assertIn(f"{hv[5]['linear_us']:.2f} µs against the heap's {hv[5]['heap_us']:.2f} µs", text)
+        for needle in prose:
+            self.assertIn(needle, text)
+
+    @unittest.skipIf(PdfReader is None, "pypdf not installed (pip install -r docs/requirements.txt)")
+    def test_complexity_pdf_is_current_and_carries_the_same_figures(self):
+        import hashlib
+        reader = PdfReader(str(ROOT / "docs" / "COMPLEXITY.pdf"))
+        source_hash = hashlib.sha256((ROOT / "docs" / "COMPLEXITY.md").read_bytes()).hexdigest()
+        self.assertEqual(reader.metadata.keywords, f"source-sha256:{source_hash}",
+                         "docs/COMPLEXITY.pdf was not built from the current COMPLEXITY.md: .venv/bin/python docs/build_pdf.py")
+        self.assertIn(len(reader.pages), (2, 3))
+        text = re.sub(r"\s+", " ", " ".join(page.extract_text() for page in reader.pages))
+        prose, cells, _ = complexity_figures()
+        for needle in prose + cells:
+            self.assertIn(needle, text, f"the PDF should show {needle!r}")
 
 
 class FallbackTest(unittest.TestCase):
