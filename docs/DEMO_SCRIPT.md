@@ -10,7 +10,7 @@ whatever you actually ran, so you can always check a figure.
 2. In the sidebar set **Speed to 1x** (click the slider thumb and press the Left arrow once, or drag it to the far left; the label above it should read 1x). Pattern: **Normal load**. Algorithm (live view): **Weighted Least Conn.**. Server: **app-3**. Leave Run settings alone (seed 42, 20 s, 100 req/s): the numbers below depend on them.
 3. Press **Start** and let one run finish, then press **Reset**. This checks that everything works and warms the page.
 4. Terminal 2, in the project folder, ready for the fallback (section "If something fails"). Open `docs/fallback/` in a text viewer too.
-5. Slides open in presenter view. Put the partner's name on slide 1 if it still says "[partner's name]".
+5. Slides open in presenter view.
 6. Close other apps, turn off notifications, plug in the laptop. Have a timer visible.
 
 ## Timing
@@ -28,7 +28,7 @@ The spoken text is about 9 minutes at a steady pace; the rest is the simulation 
 
 ## The talk
 
-### 0:00  Slide 1: Balancing the 10 AM rush  (20 s)
+### 0:00  Slide 1: Load Balancer Simulator  (20 s)
 
 > Good morning. We built a simulator for what happens to a booking site at ten o'clock, when the Tatkal window opens. The site is fictional, we call it RailDhaara, and there is no real traffic and no IRCTC data in it.
 

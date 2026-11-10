@@ -1,6 +1,6 @@
 # RailDhaara load-balancer simulator: report
 
-Algorithms course, project 27 (Cloud Server Load Balancer, Greedy + Heap). Satyam Nirala and [partner's name].
+Algorithms course, project 27 (Cloud Server Load Balancer, Greedy + Heap). Satyam Nirala and Raghav Sihag.
 Code: https://github.com/satyamnirala187/load-balancer-simulator
 
 ## 1. Summary
