@@ -186,6 +186,16 @@ class DeckTest(unittest.TestCase):
         self.assertIn("Brave", text)
         self.assertNotRegex(text, r"(?i)checked in (google )?chrome")
 
+    def test_speaker_note_timings_match_the_demo_script_budgets(self):
+        # each slide's notes open with "About m:ss"; that must equal the slide's budget in docs/DEMO_SCRIPT.md
+        plan = {int(n): int(sec) for n, sec in re.findall(r"^### [\d:]+  Slide (\d+):.*\((\d+) s\)$", read("docs", "DEMO_SCRIPT.md"), flags=re.M)}
+        self.assertEqual(sorted(plan), list(range(1, 11)), "the demo script must budget every slide")
+        for i, slide in enumerate(self.deck.slides, 1):
+            match = re.match(r"About (\d+):(\d\d)\b", slide.notes_slide.notes_text_frame.text)
+            self.assertIsNotNone(match, f"slide {i}'s notes must start with 'About m:ss'")
+            self.assertEqual(int(match.group(1)) * 60 + int(match.group(2)), plan[i],
+                             f"slide {i}: notes say {match.group(0)!r} but the demo script budgets {plan[i]} s")
+
     def test_test_count_on_the_closing_slide_is_current(self):
         suite = unittest.defaultTestLoader.discover(str(ROOT / "tests"), top_level_dir=str(ROOT))
         self.assertIn(f"{suite.countTestCases()} tests pass", self.slide_text(self.deck.slides[9]))
