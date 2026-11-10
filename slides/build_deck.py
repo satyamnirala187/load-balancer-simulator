@@ -34,7 +34,7 @@ from lbsim.traffic import make_scenario  # noqa: E402
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "RailDhaara_LoadBalancer.pptx")
 SHOT = os.path.join(ROOT, "docs", "screenshots", "01_live_view_after_kill.png")
 REPO = "github.com/satyamnirala187/load-balancer-simulator"
-PARTNER = "[partner's name]"  # not known to the build; fill in on the title slide before presenting
+PARTNER = "Raghav Sihag"
 
 W, H = 13.333, 7.5
 LEFT = 0.7
@@ -297,16 +297,15 @@ def style_axes(chart, vmax=None, vmin=0, unit=None, fmt=None, cat_title=None):
 
 # ------------------------------------------------------------------------------------------------------------ slides
 def slide_title(prs, layout):
-    s = new_slide(prs, layout, "Balancing the\v10 AM rush", dark=True, notes=(
-        "About 0:15. Say the name, the course, and that this is a simulator of a fictional booking site.\n"
-        "Fill in the partner's name on this slide before presenting."))
+    s = new_slide(prs, layout, "Load Balancer\vSimulator", dark=True, notes=(
+        "About 0:15. Say the name, the course, and that the demo scenario is a fictional booking site."))
     t = s.shapes.title
     t.left, t.top, t.width, t.height = Inches(0.9), Inches(2.3), Inches(7.4), Inches(2.1)
     t.text_frame.vertical_anchor = MSO_ANCHOR.BOTTOM
     for r in t.text_frame.paragraphs[0].runs:
         r.font.size = Pt(54)
     text(s, 0.9, 1.75, 7.2, 0.35, "ALGORITHMS  ·  PROJECT 27  ·  GREEDY + HEAP", size=13, color="accent5", bold=True)
-    text(s, 0.9, 4.65, 6.6, 0.9, "A load-balancer simulator for a fictional Tatkal booking site", size=22, color="lt2", spacing=1.1)
+    text(s, 0.9, 4.65, 6.6, 0.9, "Demo scenario: the 10 AM Tatkal rush on RailDhaara, a fictional booking site", size=22, color="lt2", spacing=1.1)
     text(s, 0.9, 6.35, 7.4, 0.35, f"Satyam Nirala and {PARTNER}", size=16, color="lt1")
     x0, base, unit = 8.75, 5.75, 0.42  # the fleet: five servers, bar height = weight
     text(s, x0, 1.75, 3.9, 0.3, "FIVE SERVERS, BAR HEIGHT = WEIGHT", size=12, color="lt2", bold=True)
@@ -624,8 +623,7 @@ def slide_limits(prs, layout, N):
 
 def slide_close(prs, layout, N):
     s = new_slide(prs, layout, "What to take away", dark=True, notes=(
-        "About 0:40. Three results, each with its number. Then the repository and questions.\n"
-        "Fill in the partner's name on the title slide, not here."))
+        "About 0:40. Three results, each with its number. Then the repository and questions."))
     rows = [(f"{N['spike_wlc']}", f"of requests failed with Weighted Least Connections in the spike, against {N['spike_lc']} for Least Connections and {N['spike_rr']} for Round Robin. Weigh the load by capacity."),
             (f"{N['bw_lc_2s']} → {N['bw_lc_pass']}", "requests lost in a 2 s blind window, cut to 3 by a passive check. How fast you notice a failure matters as much as how you route."),
             (f"{N['survivors']} of 400", "req/s the four survivors can sustain against what the spike offers, an estimate. No balancer fixes missing capacity.")]
@@ -655,7 +653,7 @@ def build(path=OUT):
     slide_capacity(prs, layout, N, charts)
     slide_limits(prs, layout, N)
     slide_close(prs, layout, N)
-    prs.core_properties.title = "Balancing the 10 AM rush: a load-balancer simulator"
+    prs.core_properties.title = "Load Balancer Simulator"
     prs.core_properties.author = "Satyam Nirala"
     prs.core_properties.subject = "Algorithms course, project 27: Cloud Server Load Balancer (Greedy + Heap)"
     prs.save(path)
