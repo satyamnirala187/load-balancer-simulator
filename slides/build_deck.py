@@ -298,7 +298,7 @@ def style_axes(chart, vmax=None, vmin=0, unit=None, fmt=None, cat_title=None):
 # ------------------------------------------------------------------------------------------------------------ slides
 def slide_title(prs, layout):
     s = new_slide(prs, layout, "Load Balancer\vSimulator", dark=True, notes=(
-        "About 0:15. Say the name, the course, and that the demo scenario is a fictional booking site."))
+        "About 0:20. Say the name, the course, and that the demo scenario is a fictional booking site."))
     t = s.shapes.title
     t.left, t.top, t.width, t.height = Inches(0.9), Inches(2.3), Inches(7.4), Inches(2.1)
     t.text_frame.vertical_anchor = MSO_ANCHOR.BOTTOM
@@ -358,7 +358,7 @@ def slide_rush(prs, layout, N, charts):
 
 def slide_algorithms(prs, layout):
     s = new_slide(prs, layout, "Three ways to pick a server", notes=(
-        "About 0:50. Round Robin takes turns. Least Connections picks the server with the fewest open connections. "
+        "About 0:40. Round Robin takes turns. Least Connections picks the server with the fewest open connections. "
         "Weighted Least Connections divides by the server's weight, so a big server is allowed more. "
         "The last two are greedy: each request goes to the best server at that moment, no look-ahead."))
     cards = [("Round Robin", "Next healthy server, in a fixed order", "Load and server size", "O(1), more when servers are down"),
@@ -381,7 +381,7 @@ def slide_algorithms(prs, layout):
 
 def slide_heap(prs, layout, N):
     s = new_slide(prs, layout, "One heap, O(log n) per request", notes=(
-        "About 1:10. The servers sit in a min-heap keyed by connections over weight, so the least loaded one is always the root. "
+        "About 1:15. The servers sit in a min-heap keyed by connections over weight, so the least loaded one is always the root. "
         "A pick reads the root, counts the connection and sifts down. A finished request lowers a key and sifts up. "
         "A server going down is removed, coming back is pushed. All logarithmic. The lock covers pick and count together, "
         "so two requests can never choose from the same stale count.\n"
@@ -422,7 +422,7 @@ def slide_heap(prs, layout, N):
 
 def slide_failover(prs, layout, N, charts):
     s = new_slide(prs, layout, "Failover: noticing is the hard part", notes=(
-        "About 1:00. The server really dies at one moment, but the balancer only finds out at the next health check. "
+        "About 1:10. The server really dies at one moment, but the balancer only finds out at the next health check. "
         "In between it keeps sending traffic to a dead server and those requests are refused. That is the blind window. "
         "Least Connections is hit hardest because a dead server shows zero connections, so it looks like the least loaded one. "
         "A passive check fixes it: three refusals in a row and the server is marked down at once.\n"
@@ -494,7 +494,7 @@ def slide_dashboard(prs, layout):
 
 def slide_load(prs, layout, N):
     s = new_slide(prs, layout, "Near capacity, weighting wins", notes=(
-        "About 0:50. Ten thousand requests per run. Each cell is the percentage of requests that failed and the average latency of the ones "
+        "About 0:45. Ten thousand requests per run. Each cell is the percentage of requests that failed and the average latency of the ones "
         "that were served. On a normal morning nothing fails. In the spike Weighted Least Connections fails 1.5 percent, Least Connections 8.8, "
         "Round Robin 10.8. In the burst nobody can win: it is more than twice what the fleet can sustain.\n"
         "Say the cost out loud: in the spike Weighted Least Connections averages higher latency, because it serves more of the traffic."))
@@ -560,7 +560,7 @@ def slide_load(prs, layout, N):
 
 def slide_capacity(prs, layout, N, charts):
     s = new_slide(prs, layout, "The survivors run out of capacity", notes=(
-        "About 0:55. We kill the biggest server, app-1, in the middle of the rush. Failover works: nothing is routed to the dead server. "
+        "About 0:50. We kill the biggest server, app-1, in the middle of the rush. Failover works: nothing is routed to the dead server. "
         "But a third of the requests still fail. The four survivors can sustain about 262 requests a second, an estimate from our latency model, "
         "and the rush offers 400. So no balancer can serve more than about 66 percent.\n"
         "Control: with app-1 dead from the start and no failover at all, a steady 400 gives the same kind of numbers. It is capacity, not failover."))
@@ -604,7 +604,7 @@ def slide_capacity(prs, layout, N, charts):
 
 def slide_limits(prs, layout, N):
     s = new_slide(prs, layout, "What this does not show", notes=(
-        "About 0:35. Say these before they are asked. The traffic and the servers are invented. Time is simulated. A kill here means the server stops "
+        "About 0:30. Say these before they are asked. The traffic and the servers are invented. Time is simulated. A kill here means the server stops "
         "accepting new requests, not a power cut. The capacity figure is an estimate. Small runs are noisy. And the dashboard was checked in one desktop browser."))
     cards = [("Synthetic", "Traffic is Poisson arrivals, the servers are invented, latency is a formula. No IRCTC data, no real network."),
              ("Simulated time", "A virtual clock: no garbage collection, kernel queues or packet loss. Real threads are tested on the balancer, not on a network."),
@@ -623,7 +623,7 @@ def slide_limits(prs, layout, N):
 
 def slide_close(prs, layout, N):
     s = new_slide(prs, layout, "What to take away", dark=True, notes=(
-        "About 0:40. Three results, each with its number. Then the repository and questions."))
+        "About 0:35. Three results, each with its number. Then the repository and questions."))
     rows = [(f"{N['spike_wlc']}", f"of requests failed with Weighted Least Connections in the spike, against {N['spike_lc']} for Least Connections and {N['spike_rr']} for Round Robin. Weigh the load by capacity."),
             (f"{N['bw_lc_2s']} → {N['bw_lc_pass']}", "requests lost in a 2 s blind window, cut to 3 by a passive check. How fast you notice a failure matters as much as how you route."),
             (f"{N['survivors']} of 400", "req/s the four survivors can sustain against what the spike offers, an estimate. No balancer fixes missing capacity.")]
