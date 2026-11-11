@@ -5,6 +5,7 @@ The run uses a fake clock so a 20 s simulation takes milliseconds and is determi
 """
 import json
 import logging
+import re
 import shlex
 import unittest
 from pathlib import Path
@@ -51,7 +52,16 @@ def bar_frames(at):
 
 
 def metric(at, label):
-    return next(m.value for m in at.metric if m.label == label)
+    """One part of the status line, e.g. `Running · 4.0 s / 20 s · 412 requests so far · 0 sent to a marked-down server`."""
+    line = re.sub(r"<[^>]+>", "", next(m.value for m in at.markdown if "class='status'" in m.value))
+    state, time, requests, marked_down = line.split(" · ")
+    return {"Run": state, "Simulated time": time, "Requests so far": requests.split()[0],
+            "Sent to a marked-down server": marked_down.split()[0]}[label]
+
+
+def html_legends(at, name):
+    """The legend rows on the page that mention `name` (legends are HTML above the charts, not Vega legends)."""
+    return [m.value for m in at.main.markdown if "class='legend'" in m.value and name in m.value]
 
 
 def page_function(name):
@@ -148,9 +158,13 @@ class DashboardTest(unittest.TestCase):
                 continue
             lines += 1
             color = spec["encoding"]["color"]
-            self.assertEqual(color["legend"]["columns"], 1)  # one entry per row: three names do not fit in a row at 390 px
+            self.assertIsNone(color["legend"])  # a Vega legend is cut off at 390 px; the HTML one above the charts wraps
             self.assertEqual(len(color["scale"]["domain"]), len(color["scale"]["range"]))  # explicit, theme-safe colours
         self.assertEqual(lines, 2)  # latency and throughput
+        (legend,) = html_legends(at, NAMES[0])  # one row for both line charts
+        self.assertIn("flex-wrap:wrap", legend)
+        for name in NAMES:
+            self.assertIn(name, legend)
 
     def test_no_stray_values_are_printed_on_the_page(self):
         # Streamlit "magic" prints bare expressions, so a stray `a() if c else b()` shows a literal `None`
@@ -193,11 +207,15 @@ class DashboardTest(unittest.TestCase):
         panels = [m.value for m in at.markdown if m.value.startswith("#### ")]
         self.assertEqual(panels, [f"#### {n}" for n in NAMES])  # all three side by side
         self.assertEqual(len(bar_frames(at)), 3)
+        self.assertEqual(len(html_legends(at, "marked down")), 1)  # the state legend once, not under each chart
 
         tables = [df.values.tolist() for df in (d.value for d in at.dataframe)]  # comparison, load, failover
         self.assertEqual(len(tables), 3)
         for t in tables:
             self.assertEqual([row[0] for row in t], NAMES)
+        # the big per-algorithm figures are the comparison table's own "failed" and "avg ms" columns
+        self.assertEqual([m.value for m in at.metric if m.label == "failed"], [row[4] for row in tables[0]])
+        self.assertEqual([m.value for m in at.metric if m.label == "avg latency"], [f"{row[2]} ms" for row in tables[0]])
 
         # the page prints the CLI command for this very run; the CLI's numbers must equal the page's
         cmd = at.code[0].value
@@ -285,29 +303,45 @@ class DashboardTest(unittest.TestCase):
         at.radio[0].set_value("Live view").run()
         self.assertTrue(any("app-3 killed on schedule" in m.value for m in at.markdown))
 
-    def test_verdict_names_the_winner_and_states_ties(self):
+    def test_verdict_puts_failures_first_and_latency_second(self):
         verdict = page_function("verdict")
+        priority = "Failed requests are judged first; average latency only breaks a tie."
 
         def say(*rows):
             return verdict([SimpleNamespace(algorithm=n, failed=f, avg_latency_ms=ms) for n, (f, ms) in zip(NAMES, rows)])
 
-        self.assertEqual(say((9, 80.0), (7, 70.0), (3, 60.0)), "Weighted Least Conn. did best on both counts: "
-                         "fewest failed requests (3) and lowest average latency (60.0 ms).")
-        self.assertEqual(say((9, 60.0), (7, 70.0), (3, 80.0)), "Weighted Least Conn. failed the fewest requests (3); "
-                         "Round Robin had the lowest average latency (60.0 ms).")
-        self.assertEqual(say((0, 77.9), (0, 64.2), (0, 62.8)), "No algorithm failed a request; "
-                         "Weighted Least Conn. had the lowest average latency (62.8 ms).")
-        self.assertEqual(say((5, 70.0), (5, 70.0), (5, 70.0)), "All three failed the same number of requests (5); "
-                         "all three had the same average latency (70.0 ms).")
-        # 64.24 and 64.16 both print as 64.2 in the table, so the sentence must call it a tie too
-        self.assertEqual(say((4, 64.24), (4, 64.16), (6, 90.0)), "Round Robin and Least Connections tied for the fewest "
-                         "failed requests (4); Round Robin and Least Connections tied for the lowest average latency (64.2 ms).")
+        # a clear winner on failures is the headline, whoever was fastest
+        self.assertEqual(say((9, 80.0), (7, 70.0), (3, 60.0)), (
+            "Weighted Least Conn. wins: it failed the fewest requests (3).", "It also had the lowest average latency (60.0 ms)."))
+        self.assertEqual(say((9, 60.0), (7, 70.0), (3, 80.0)), (
+            "Weighted Least Conn. wins: it failed the fewest requests (3).",
+            "Average latency is judged second: Round Robin had the lowest (60.0 ms)."))
+        self.assertEqual(say((9, 60.0), (7, 60.0), (3, 80.0)), (
+            "Weighted Least Conn. wins: it failed the fewest requests (3).",
+            "Average latency is judged second: Round Robin and Least Connections tied for the lowest (60.0 ms)."))
+        self.assertEqual(say((9, 70.0), (7, 70.0), (3, 70.0))[1],
+                         "Average latency, which is judged second, was the same for all three (70.0 ms).")
+        # a tie on failures is broken by latency, among the tied algorithms only
+        self.assertEqual(say((0, 77.9), (0, 64.2), (0, 62.8)), (
+            "No algorithm failed a request, so average latency decides: Weighted Least Conn. wins (62.8 ms).", priority))
+        self.assertEqual(say((4, 70.0), (4, 65.0), (6, 50.0)), (  # the fastest of all failed more, so it cannot win
+            "Round Robin and Least Connections tied for the fewest failed requests (4 each), so average latency decides: "
+            "Least Connections wins (65.0 ms).", priority))
+        # ties on both are called ties; 64.24 and 64.16 both print as 64.2 in the table
+        self.assertEqual(say((4, 64.24), (4, 64.16), (6, 90.0)), (
+            "Round Robin and Least Connections tied for the fewest failed requests (4 each), and they also tied on "
+            "average latency (64.2 ms): no single winner.", priority))
+        self.assertEqual(say((5, 70.0), (5, 70.0), (5, 70.0)), (
+            "All three failed the same number of requests (5), and all three also tied on average latency (70.0 ms): "
+            "no single winner.", priority))
+        self.assertEqual(say((5, 70.0), (5, 70.0), (5, 80.0))[0], "All three failed the same number of requests (5), and "
+                         "Round Robin and Least Connections also tied on average latency (70.0 ms): no single winner.")
 
-    def test_verdict_is_shown_only_for_a_finished_run_in_the_compare_view(self):
+    def test_verdict_is_a_heading_shown_only_for_a_finished_run_in_the_compare_view(self):
         verdict = page_function("verdict")
 
         def shown():
-            return [m.value for m in at.markdown if m.value.startswith("**Verdict:**")]
+            return [h.value for h in at.main.subheader]
 
         at, run, clock = open_app()
         at.radio[0].set_value("Compare all 3").run()
@@ -319,12 +353,42 @@ class DashboardTest(unittest.TestCase):
         clock.t = 40.0
         at.run()
         self.assertTrue(run.finished)
-        self.assertEqual(shown(), [f"**Verdict:** {verdict(run.results())}"])
+        headline, detail = verdict(run.results())
+        self.assertEqual(shown(), [headline])
+        self.assertIn(detail, [m.value for m in at.main.markdown])
         avg = at.dataframe[0].value["avg ms"]
-        self.assertIn(f"({avg.astype(float).min()} ms)", shown()[0])  # the number is the one in the table below it
-        self.assertIn("No algorithm failed a request", shown()[0])
+        self.assertIn(f"({avg.astype(float).min()} ms)", headline)  # the number is the one in the table below it
+        self.assertTrue(headline.startswith("No algorithm failed a request, so average latency decides: "), headline)
         at.radio[0].set_value("Live view").run()
         self.assertEqual(shown(), [])
+
+    def test_start_button_reads_pause_while_the_run_is_running(self):
+        at, run, clock = open_app()
+        self.assertEqual(at.button(key="start").label, "Start")
+        at.button(key="start").click().run()
+        self.assertTrue(run.running)
+        self.assertEqual(at.button(key="start").label, "Pause")  # on the very rerun the click caused, not the next one
+        clock.t = 4.0
+        at.button(key="start").click().run()
+        self.assertFalse(run.running)
+        self.assertEqual(at.button(key="start").label, "Start")
+        at.button(key="start").click().run()
+        clock.t = 60.0
+        at.run()
+        self.assertTrue(run.finished)
+        self.assertEqual((at.button(key="start").label, at.button(key="start").disabled), ("Start", True))
+
+    def test_kill_target_defaults_to_the_server_the_beat_is_about(self):
+        at, run, clock = open_app()
+        self.assertEqual(at.selectbox[2].value, "app-1")
+        at.button(key="beat2").click().run()
+        self.assertEqual(at.selectbox[2].value, "app-1")  # no server dies in beat 2, so nothing to point at
+        at.button(key="beat3").click().run()
+        self.assertEqual(at.selectbox[2].value, "app-3")  # the server beat 3 kills: Revive is one click away
+        at.selectbox[2].set_value("app-5").run()
+        self.assertEqual(at.selectbox[2].value, "app-5")  # still the presenter's to change
+        at.button(key="reset").click().run()
+        self.assertEqual(at.selectbox[2].value, "app-5")
 
     def test_each_algorithm_line_has_its_own_dash_pattern_and_every_gloss_is_there(self):
         at, run, clock = open_app()
@@ -332,15 +396,22 @@ class DashboardTest(unittest.TestCase):
             return [m.value for m in where.markdown if text in m.value]
 
         self.assertEqual(len(glosses(at.sidebar, "Takes turns: each request goes to the next server in line")), 1)
-        self.assertEqual(len(glosses(at.main, "Each bar is one server")), 2)
+        self.assertEqual(len(glosses(at.main, "Each bar is one server")), 1)  # said once, in the state legend row
+        self.assertEqual(len(glosses(at.main, "Requests answered in the last 5 s.")), 1)  # one line under each bar chart
+        self.assertEqual(len(glosses(at.main, "Requests being served right now.")), 1)
         self.assertEqual(list(at.caption), [])  # st.caption's grey is too faint on the light theme
         for g in glosses(at, "class='gloss'"):
-            self.assertIn("color:#475569", g)  # the palette's muted colour (AppTest has no browser theme: light)
+            self.assertIn("color:#4A4D55", g)  # the palette's muted colour (AppTest has no browser theme: light)
+        for m in at.markdown:
+            self.assertFalse(re.search("[\U0001F7E0-\U0001F7EB\U0001F534\U0001F535]", m.value), m.value)  # no emoji dots
+        self.assertEqual(len(glosses(at.main, "background:#4c78a8")), 2)  # squares in the chart's colour: legend + servers
         at.button(key="start").click().run()
         clock.t = 40.0
         at.run()
         at.radio[0].set_value("Compare all 3").run()
-        self.assertEqual(len(glosses(at.main, "Each bar is one server")), 3)
+        self.assertEqual(len(glosses(at.main, "Each bar is one server")), 1)
+        for gloss in page_function("ALGO_GLOSS").values():  # only the per-algorithm line under each compare chart
+            self.assertEqual(len(glosses(at.main, gloss)), 1)
         charts = 0
         for el in at.main:
             if getattr(el, "type", None) != "vega_lite_chart":
@@ -353,9 +424,11 @@ class DashboardTest(unittest.TestCase):
             self.assertEqual(dash["scale"]["domain"], NAMES)
             self.assertEqual(dash["scale"]["domain"], color["scale"]["domain"])
             self.assertEqual(len({tuple(d) for d in dash["scale"]["range"]}), len(NAMES))  # three different patterns
-            self.assertEqual(dash["legend"], color["legend"])  # so Vega-Lite draws one merged legend, not two
+            self.assertIsNone(dash["legend"])
             self.assertEqual(color["scale"]["range"], ["#d97706", "#4c78a8", "#2f9e44"])  # colours unchanged
         self.assertEqual(charts, 2)
+        (legend,) = html_legends(at, NAMES[0])  # the HTML legend shows the three dash styles too
+        self.assertEqual(re.findall(r"border-top:\.2em (\w+) ", legend), ["solid", "dashed", "dotted"])
 
 
 if __name__ == "__main__":

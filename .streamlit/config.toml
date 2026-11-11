@@ -1,15 +1,21 @@
-# Dashboard colours (ui-ux-pro-max "Status Page / Incident Management" palette), one set per theme.
-# The chart colours live in dashboard.py and are not themed.
+# Ink on paper: the page has no hue, so colour on screen always means data (the chart colours live in dashboard.py).
+[client]
+toolbarMode = "minimal"  # no Deploy button or developer menu on the projector
+
+[theme]
+base = "light"  # the projector demo is light; the dark theme stays in the menu (top right)
+baseFontSize = 18
+
 [theme.light]
-primaryColor = "#16A34A"
-backgroundColor = "#F0FDF4"
-secondaryBackgroundColor = "#FFFFFF"
-textColor = "#14532D"
-borderColor = "#BBF7D0"
+primaryColor = "#16181D"
+backgroundColor = "#FAF9F6"
+secondaryBackgroundColor = "#EDEBE6"
+textColor = "#16181D"
+borderColor = "#8A8780"
 
 [theme.dark]
-primaryColor = "#16A34A"
-backgroundColor = "#0F172A"
-secondaryBackgroundColor = "#111827"
-textColor = "#F8FAFC"
-borderColor = "#334155"
+primaryColor = "#F2F0EA"
+backgroundColor = "#16171A"
+secondaryBackgroundColor = "#24262B"
+textColor = "#F2F0EA"
+borderColor = "#6E6C66"
