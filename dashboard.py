@@ -14,7 +14,7 @@ from lbsim.report import (cli_command, comparison_table, failover_table, failove
                           recent_load, timeseries)
 from lbsim.servers import FLEET
 from lbsim.simulator import routed_while_marked_down
-from lbsim.traffic import make_scenario
+from lbsim.traffic import Fault, make_scenario
 
 PATTERNS = {"normal": "Normal load", "spike": "Sudden spike (Tatkal rush)", "slow_server": "One slow server",
             "burst": "Sudden 10x burst"}
@@ -24,10 +24,20 @@ REFRESH_S = 0.5
 SERIES_COLOR = {"Round Robin": "#d97706", "Least Connections": "#4c78a8", "Weighted Least Conn.": "#2f9e44",
                 "served": "#4c78a8", "failed": "#e45756", "avg latency (ms)": "#4c78a8"}
 STATE_COLOR = {"up": "#4c78a8", "dead, not detected": "#f58518", "marked down": "#e45756", "alive, not back yet": "#b79a20"}
+# a dash pattern per algorithm as well as a colour, so the lines do not depend on colour alone; the rest stay solid
+SERIES_DASH = {"Least Connections": [6, 3], "Weighted Least Conn.": [2, 2]}
 STATE_LABEL = {"up": "🟢 up", "dead, not detected": "🟠 dead, not detected yet",
                "marked down": "🔴 marked down", "alive, not back yet": "🟡 alive, not back yet"}
+# demo story: beat number -> (label, traffic pattern, server killed on schedule or None)
+BEATS = {1: ("Normal morning", "normal", None), 2: ("Tatkal rush", "spike", None), 3: ("Server dies mid-rush", "spike", "app-3")}
+KILL_AT = 0.45  # beat 3 kills its server this far into the run: inside the rush (traffic.SURGES), 9 s of the default 20 s
+ALGO_GLOSS = {"Round Robin": "Takes turns: each request goes to the next server in line, however busy it is.",
+              "Least Connections": "Each request goes to the server with the fewest open connections.",
+              "Weighted Least Conn.": "Fewest open connections for its size, so bigger servers take more."}
 
 st.set_page_config(page_title="RailDhaara Load Balancer Simulator", page_icon="🚆", layout="wide")
+# muted text colour of the palette for the theme in use: 7.2:1 on the light background, 12:1 on the dark one
+MUTED = "#CBD5E1" if st.context.theme.type == "dark" else "#475569"
 
 
 def server_state(s):
@@ -39,6 +49,11 @@ def server_state(s):
 
 def states_of(sim):
     return {s.id: server_state(s) for s in sim.servers}
+
+
+def gloss(text, where=st):
+    """Small helper text. Not st.caption: that is the text colour at 60% opacity, only 3.2:1 on the light theme."""
+    where.markdown(f"<span class='gloss' style='color:{MUTED};font-size:.875rem'>{text}</span>", unsafe_allow_html=True)
 
 
 def bars(values, states, y_title, ymax=None):
@@ -55,10 +70,13 @@ def lines(columns, t, y_title):
     # Altair, not st.line_chart: the native chart makes Vega log an "Infinite extent" warning on every live refresh
     df = pd.DataFrame(columns, index=pd.Index(t, name="second")).astype(float)
     df = df.reset_index().melt("second", var_name="series", value_name="value")
+    legend = alt.Legend(orient="bottom", columns=1, symbolSize=400)  # wide enough symbols to show the dash pattern
     chart = alt.Chart(df).mark_line().encode(
         x=alt.X("second:Q", title="simulated seconds"), y=alt.Y("value:Q", title=y_title, scale=alt.Scale(zero=True)),
-        color=alt.Color("series:N", title=None, legend=alt.Legend(orient="bottom", columns=1),
+        color=alt.Color("series:N", title=None, legend=legend,
                         scale=alt.Scale(domain=list(columns), range=[SERIES_COLOR[c] for c in columns])),
+        strokeDash=alt.StrokeDash("series:N", title=None, legend=legend,  # same legend settings: the two merge into one
+                                  scale=alt.Scale(domain=list(columns), range=[SERIES_DASH.get(c, [1, 0]) for c in columns])),
         tooltip=["second", "series", "value"])
     st.altair_chart(chart.properties(height=240), width="stretch")
 
@@ -66,6 +84,31 @@ def lines(columns, t, y_title):
 def show_table(table):
     headers, rows = table
     st.dataframe(pd.DataFrame(rows, columns=headers), hide_index=True, width="stretch")
+
+
+def verdict(results):
+    """One sentence on a finished run: who failed the fewest requests and who answered fastest.
+    Compared at the precision the comparison table prints, so a tie on the page is called a tie here."""
+    def best(value):
+        low = min(value(r) for r in results)
+        return [r.algorithm for r in results if value(r) == low], low
+
+    def who(names, tied, alone):
+        return f"{' and '.join(names)} tied for {tied}" if len(names) > 1 else f"{names[0]} {alone}"
+
+    fewest, failed = best(lambda r: r.failed)
+    fastest, ms = best(lambda r: float(f"{r.avg_latency_ms:.1f}"))
+    if fewest == fastest and len(fewest) == 1:
+        return f"{fewest[0]} did best on both counts: fewest failed requests ({failed}) and lowest average latency ({ms} ms)."
+    if len(fewest) == len(results):
+        fail = "No algorithm failed a request" if failed == 0 else f"All three failed the same number of requests ({failed})"
+    else:
+        fail = who(fewest, "the fewest failed requests", "failed the fewest requests") + f" ({failed})"
+    if len(fastest) == len(results):
+        fast = "all three had the same average latency"
+    else:
+        fast = who(fastest, "the lowest average latency", "had the lowest average latency")
+    return f"{fail}; {fast} ({ms} ms)."
 
 
 def status(run, results):
@@ -80,8 +123,9 @@ def status(run, results):
     st.progress(1.0 if run.finished else min(run.now_ms / dur, 1.0))
 
 
-def events(sim, now_ms):
-    ev = [(f.at_ms, f"{f.server_id} {'revived' if f.alive else 'killed'} by you") for f in sim.faults if f.at_ms <= now_ms]
+def events(sim, now_ms, planned):
+    ev = [(f.at_ms, f"{f.server_id} {'revived' if f.alive else 'killed'} {'on schedule (story beat)' if f in planned else 'by you'}")
+          for f in sim.faults if f.at_ms <= now_ms]
     ev += [(t, f"{sid} {'back in rotation' if up else 'marked down'} by the health check") for t, sid, up in sim.checker.log]
     if ev:
         st.markdown("**Events**\n" + "\n".join(f"- {t / 1000:.2f} s: {text}" for t, text in sorted(ev)[-8:]))
@@ -92,14 +136,16 @@ def live_view(run, results, r):
     states, load = states_of(sim), r.load
     for col, s in zip(st.columns(len(sim.servers)), sim.servers):
         col.markdown(f"**{s.id}** · weight {s.weight}  \n{STATE_LABEL[states[s.id]]}")
-        col.caption(f"{s.connections} open · {load[s.id]} handled")
+        gloss(f"{s.connections} open · {load[s.id]} handled", col)
     left, right = st.columns(2)
     with left:
         st.markdown(f"**Handled in the last 5 s** · {r.algorithm}")
         bars(recent_load(r.records, list(load), run.now_ms), states, "requests")
+        gloss("Each bar is one server: the requests it answered in the last 5 seconds.")
     with right:
         st.markdown("**Open connections right now**")
         bars({s.id: s.connections for s in sim.servers}, states, "connections")
+        gloss("Each bar is one server: the requests it is working on at this instant.")
     ts = timeseries(r.records, upto_ms=run.now_ms)
     if not ts["t"]:
         st.info("Press **Start** in the sidebar. Then try **Kill** on a server and watch its bar drain to zero.")
@@ -111,7 +157,7 @@ def live_view(run, results, r):
     with right:
         st.markdown("**Throughput per second**")
         lines({"served": ts["ok"], "failed": ts["failed"]}, ts["t"], "requests/s")
-    events(sim, run.now_ms)
+    events(sim, run.now_ms, run.scenario.faults)
 
 
 def compare_view(run, results):
@@ -120,12 +166,14 @@ def compare_view(run, results):
     for col, r in zip(st.columns(3), results):
         with col:
             st.markdown(f"#### {r.algorithm}")
-            st.caption(f"{r.requests_per_sec:.1f} req/s · avg {r.avg_latency_ms:.1f} ms · {r.failed} failed")
+            gloss(f"{r.requests_per_sec:.1f} req/s · avg {r.avg_latency_ms:.1f} ms · {r.failed} failed")
             bars(r.load, states_of(run.sims[r.algorithm]), "requests", ymax)
+            gloss(f"Each bar is one server: the requests it has answered so far. {ALGO_GLOSS[r.algorithm]}")
     show_table(comparison_table(results))
     show_table(load_table(results))
-    for sid in sorted({f.server_id for f in results[0].faults if not f.alive}):
-        st.caption(failover_title(results[0], sid, run.interval_ms, never="never" if run.finished else "(not yet)"))
+    # a kill scheduled by story beat 3 only gets its table once it has happened
+    for sid in sorted({f.server_id for f in results[0].faults if not f.alive and f.at_ms <= run.now_ms}):
+        gloss(failover_title(results[0], sid, run.interval_ms, never="never" if run.finished else "(not yet)"))
         show_table(failover_table(results, sid))
     ts = {r.algorithm: timeseries(r.records, upto_ms=run.now_ms) for r in results}
     t = ts[results[0].algorithm]["t"]
@@ -138,7 +186,7 @@ def compare_view(run, results):
             st.markdown("**Throughput per second** (lines overlap when nothing fails)")
             lines({n: x["ok"] for n, x in ts.items()}, t, "requests/s")
     cmd = cli_command(*st.session_state.cfg, results[0].faults)
-    st.caption("The same run from the command line (numbers are identical once the run has finished):"
+    gloss("The same run from the command line (numbers are identical once the run has finished):"
                if cmd else "This sequence of kills needs more than one CLI command, so there is no single CLI equivalent.")
     if cmd:
         st.code(cmd, language="bash")
@@ -150,29 +198,46 @@ def panel(run, view, algo, polling):
         st.rerun()  # the run just ended: redraw once more, this time without polling
     results = run.results()
     status(run, results)
+    if view == VIEWS[1] and run.finished:  # only a finished run has final numbers to judge
+        st.markdown(f"**Verdict:** {verdict(results)}")
     if view == VIEWS[0]:
         live_view(run, results, results[[r.algorithm for r in results].index(algo)])
     else:
         compare_view(run, results)
 
 
-def new_run(cfg, speed):
-    return LiveRun(make_scenario(*cfg), speed=speed)
+def new_run(cfg, speed, beat=None):
+    scenario = make_scenario(*cfg)
+    victim = BEATS[beat][2] if beat else None
+    if victim:  # scheduled in the scenario all three algorithms share, so they lose the server at the same instant
+        scenario.faults.append(Fault(scenario.duration_ms * KILL_AT, victim, False))
+    return LiveRun(scenario, speed=speed)
+
+
+def set_beat(n):
+    """Button callback: runs before the script, so it may set the Pattern widget's value."""
+    st.session_state.pattern, st.session_state.beat = BEATS[n][1], n
+    st.session_state.pop("run", None)  # a beat always starts a fresh run, even when the pattern does not change
+    st.toast(f"Beat {n}: {BEATS[n][0]} is set up. Press Start in the sidebar.")
 
 
 with st.sidebar:
     st.header("Traffic")
-    pattern = st.selectbox("Pattern", list(PATTERNS), format_func=PATTERNS.get)
+    pattern = st.selectbox("Pattern", list(PATTERNS), format_func=PATTERNS.get, key="pattern")
     algo = st.selectbox("Algorithm (live view)", [a.name for a in ALGORITHMS])
+    gloss(ALGO_GLOSS[algo])
     speed = st.select_slider("Speed", [1, 2, 4, 8], value=2, format_func=lambda x: f"{x}x")
     with st.expander("Run settings"):
         seed = st.number_input("Seed", value=42, step=1)
         duration = st.number_input("Duration (s)", min_value=5, max_value=60, value=20, step=1)
         rate = st.number_input("Base rate (requests/s)", min_value=10, max_value=300, value=100, step=10)
 
+beat = st.session_state.get("beat")
+if beat and BEATS[beat][1] != pattern:
+    beat = st.session_state.beat = None  # the pattern was changed by hand: no beat is active any more
 cfg = (pattern, int(seed), int(duration), int(rate))
 if st.session_state.get("cfg") != cfg or "run" not in st.session_state:
-    st.session_state.cfg, st.session_state.run = cfg, new_run(cfg, speed)
+    st.session_state.cfg, st.session_state.run = cfg, new_run(cfg, speed, beat)
 run = st.session_state.run
 run.speed = speed
 
@@ -185,7 +250,7 @@ with st.sidebar:
         else:
             run.start()
     if b.button("Reset", key="reset", width="stretch"):
-        st.session_state.run = run = new_run(cfg, speed)
+        st.session_state.run = run = new_run(cfg, speed, beat)
     st.header("Failure injection")
     target = st.selectbox("Server", [f[0] for f in FLEET])
     live = run.started and not run.finished
@@ -194,15 +259,33 @@ with st.sidebar:
         st.toast(f"{target} killed at {run.now_ms / 1000:.1f} s" if run.kill(target) else f"{target} is already down")
     if b.button("Revive", key="revive", disabled=not live, width="stretch"):
         st.toast(f"{target} revived at {run.now_ms / 1000:.1f} s" if run.revive(target) else f"{target} is already up")
-    st.caption("Kill: the server stops accepting new requests. The load balancer only notices at its next health "
+    gloss("Kill: the server stops accepting new requests. The load balancer only notices at its next health "
                "check (every 0.5 s), and requests already in flight on it finish.")
 
 st.title("RailDhaara load balancer simulator")
-st.caption("A fictional Indian Railways-style booking site under a Tatkal-style rush. Simulated servers and traffic only.")
+gloss("A fictional Indian Railways-style booking site under a Tatkal-style rush. Simulated servers and traffic only.")
 # On a phone the sidebar starts collapsed and the controls live in it, so say so (hidden on wider screens)
-st.markdown("<style>.mobile-hint{display:none}@media (max-width:640px){.mobile-hint{display:block;padding:.5rem .75rem;"
+# .st-key-story: the story buttons get 44 px touch targets (Streamlit's default is 40 px).
+# Primary buttons: black text, 6.4:1 on the palette green (Streamlit's white is 3.3:1). Not while hovered or pressed:
+# Streamlit darkens the green then, and its own white text is the readable one (7.9:1).
+st.markdown("<style>.st-key-story button{min-height:44px}"
+            "[data-testid='stBaseButton-primary']:not(:disabled):not(:hover):not(:active){color:#000}"
+            ".mobile-hint{display:none}@media (max-width:640px){.mobile-hint{display:block;padding:.5rem .75rem;"
             "border-radius:.5rem;background:rgba(128,128,128,.15);font-size:.9rem}}</style>"
             "<div class='mobile-hint'>Controls (Start, Kill, Revive) are in the sidebar: tap <b>&raquo;</b> at the top left.</div>",
             unsafe_allow_html=True)
+with st.container(key="story"):  # the three demo beats; the columns stack full-width on a phone
+    for col, (n, (name, _, victim)) in zip(st.columns(len(BEATS)), BEATS.items()):
+        col.button(f"{n} {name}", key=f"beat{n}", type="primary" if n == beat else "secondary", on_click=set_beat, args=(n,),
+                   width="stretch")
+if beat and BEATS[beat][2]:
+    gloss(f"Beat {beat}: the rush again, and {BEATS[beat][2]} is killed at {duration * KILL_AT:g} s for all three algorithms at once.")
+with st.expander("What am I looking at?"):
+    st.markdown(f"- **The setup:** {len(FLEET)} simulated servers of different sizes (weights "
+                f"{', '.join(str(f[1]) for f in FLEET)}) share the incoming booking requests.\n"
+                "- **The question:** which rule for picking the next server (the algorithm) fails the fewest requests "
+                "and answers the fastest.\n"
+                "- **How to use it:** pick a story beat above, press **Start** in the sidebar, then open *Compare all 3* "
+                "to see the same traffic through all three rules.")
 view = st.radio("View", VIEWS, horizontal=True, label_visibility="collapsed")
 st.fragment(panel, run_every=REFRESH_S if run.running else None)(run, view, algo, run.running)

@@ -4,13 +4,15 @@ They need Streamlit (pip install -r requirements.txt) and are skipped without it
 The run uses a fake clock so a 20 s simulation takes milliseconds and is deterministic.
 """
 import json
+import logging
 import shlex
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 from lbsim.algorithms import ALGORITHMS
 from lbsim.live import LiveRun
-from lbsim.traffic import make_scenario
+from lbsim.traffic import Fault, make_scenario
 
 from .test_live import Clock, cli_rows
 
@@ -52,6 +54,16 @@ def metric(at, label):
     return next(m.value for m in at.metric if m.label == label)
 
 
+def page_function(name):
+    """A plain function from dashboard.py. Importing the page outside `streamlit run` logs bare-mode warnings."""
+    logging.disable(logging.WARNING)
+    try:
+        import dashboard
+    finally:
+        logging.disable(logging.NOTSET)
+    return getattr(dashboard, name)
+
+
 @unittest.skipIf(AppTest is None, "streamlit not installed (pip install -r requirements.txt)")
 class DashboardTest(unittest.TestCase):
     def test_loads_without_errors_with_every_control(self):
@@ -63,7 +75,8 @@ class DashboardTest(unittest.TestCase):
         self.assertEqual(at.selectbox[1].options, NAMES)
         self.assertEqual(at.radio[0].options, ["Live view", "Compare all 3"])
         self.assertEqual({b.key: b.disabled for b in at.button},
-                         {"start": False, "reset": False, "kill": True, "revive": True})  # nothing to kill yet
+                         {"start": False, "reset": False, "kill": True, "revive": True,  # nothing to kill yet
+                          "beat1": False, "beat2": False, "beat3": False})
         self.assertEqual(metric(at, "Sent to a marked-down server"), "0")
         self.assertEqual(len(bar_frames(at)), 2)  # recent load + open connections
 
@@ -204,6 +217,145 @@ class DashboardTest(unittest.TestCase):
         self.assertEqual(len(tables), 2)  # no kill, so no failover table
         for i, name in enumerate(NAMES):
             self.assertEqual(cli[name], [t[i] for t in tables], name)
+
+    def test_story_beats_configure_and_reset_the_run(self):
+        at, run, clock = open_app()
+        self.assertEqual([b.label for b in at.button if b.key.startswith("beat")],
+                         ["1 Normal morning", "2 Tatkal rush", "3 Server dies mid-rush"])
+        self.assertEqual(at.main.expander[0].label, "What am I looking at?")
+        self.assertFalse(at.main.expander[0].proto.expanded)  # collapsed until asked for
+
+        def active():
+            return [b.key for b in at.button if b.proto.type == "primary" and b.key.startswith("beat")]
+
+        self.assertEqual(active(), [])
+        at.button(key="start").click().run()
+        at.button(key="beat2").click().run()
+        self.assertEqual(list(at.exception), [])
+        fresh = at.session_state["run"]
+        self.assertIsNot(fresh, run)  # the beat reset the run ...
+        self.assertFalse(fresh.started)  # ... and left Start to the presenter
+        self.assertEqual((fresh.scenario.name, fresh.scenario.faults), ("spike", []))
+        self.assertEqual(at.selectbox[0].value, "spike")  # the sidebar shows what the beat chose
+        self.assertEqual(active(), ["beat2"])
+        self.assertIn("Beat 2: Tatkal rush", at.toast[0].value)
+
+        at.button(key="beat3").click().run()  # same pattern as beat 2, still a new run
+        doomed = at.session_state["run"]
+        self.assertIsNot(doomed, fresh)
+        self.assertEqual(active(), ["beat3"])
+        self.assertEqual(doomed.scenario.faults, [Fault(9000.0, "app-3", False)])  # inside the 8-12 s rush
+        for sim in doomed.sims.values():  # fair compare: every algorithm has the same kill scheduled
+            self.assertEqual(sim.faults, doomed.scenario.faults)
+        self.assertTrue(any("app-3 is killed at 9 s" in m.value for m in at.markdown))
+
+        at.button(key="reset").click().run()  # Reset keeps the beat, kill included
+        self.assertEqual(at.session_state["run"].scenario.faults, [Fault(9000.0, "app-3", False)])
+
+        at.selectbox[0].set_value("burst").run()  # a pattern picked by hand ends the story beat
+        self.assertEqual(active(), [])
+        self.assertEqual(at.session_state["run"].scenario.faults, [])
+        at.selectbox[0].set_value("spike").run()
+        self.assertEqual(at.session_state["run"].scenario.faults, [])  # and it does not come back by itself
+
+    def test_beat_three_kills_the_server_on_schedule_and_matches_the_cli(self):
+        at, _, _ = open_app()
+        at.button(key="beat3").click().run()
+        clock = Clock()
+        run = at.session_state["run"]
+        run.clock, run.speed = clock, 1
+        at.select_slider[0].set_value(1).run()
+        at.button(key="start").click().run()
+        at.radio[0].set_value("Compare all 3").run()
+        self.assertEqual(len(at.dataframe), 2)  # no failover table before the kill has happened
+        clock.t = 40.0
+        at.run()
+        self.assertTrue(run.finished)
+        for sim in run.sims.values():
+            self.assertFalse(sim.by_id["app-3"].alive)
+            self.assertEqual(sim.checker.log, [(9500, "app-3", False)])
+        tables = [d.value.values.tolist() for d in at.dataframe]
+        self.assertEqual(len(tables), 3)
+        cmd = at.code[0].value
+        self.assertIn("--pattern spike", cmd)
+        self.assertIn("--kill-server app-3 --at 9.0s", cmd)
+        cli = cli_rows(*shlex.split(cmd)[3:])
+        for i, name in enumerate(NAMES):
+            self.assertEqual(cli[name], [t[i] for t in tables], name)
+        at.radio[0].set_value("Live view").run()
+        self.assertTrue(any("app-3 killed on schedule" in m.value for m in at.markdown))
+
+    def test_verdict_names_the_winner_and_states_ties(self):
+        verdict = page_function("verdict")
+
+        def say(*rows):
+            return verdict([SimpleNamespace(algorithm=n, failed=f, avg_latency_ms=ms) for n, (f, ms) in zip(NAMES, rows)])
+
+        self.assertEqual(say((9, 80.0), (7, 70.0), (3, 60.0)), "Weighted Least Conn. did best on both counts: "
+                         "fewest failed requests (3) and lowest average latency (60.0 ms).")
+        self.assertEqual(say((9, 60.0), (7, 70.0), (3, 80.0)), "Weighted Least Conn. failed the fewest requests (3); "
+                         "Round Robin had the lowest average latency (60.0 ms).")
+        self.assertEqual(say((0, 77.9), (0, 64.2), (0, 62.8)), "No algorithm failed a request; "
+                         "Weighted Least Conn. had the lowest average latency (62.8 ms).")
+        self.assertEqual(say((5, 70.0), (5, 70.0), (5, 70.0)), "All three failed the same number of requests (5); "
+                         "all three had the same average latency (70.0 ms).")
+        # 64.24 and 64.16 both print as 64.2 in the table, so the sentence must call it a tie too
+        self.assertEqual(say((4, 64.24), (4, 64.16), (6, 90.0)), "Round Robin and Least Connections tied for the fewest "
+                         "failed requests (4); Round Robin and Least Connections tied for the lowest average latency (64.2 ms).")
+
+    def test_verdict_is_shown_only_for_a_finished_run_in_the_compare_view(self):
+        verdict = page_function("verdict")
+
+        def shown():
+            return [m.value for m in at.markdown if m.value.startswith("**Verdict:**")]
+
+        at, run, clock = open_app()
+        at.radio[0].set_value("Compare all 3").run()
+        self.assertEqual(shown(), [])  # not started
+        at.button(key="start").click().run()
+        clock.t = 10.0
+        at.run()
+        self.assertEqual(shown(), [])  # half way
+        clock.t = 40.0
+        at.run()
+        self.assertTrue(run.finished)
+        self.assertEqual(shown(), [f"**Verdict:** {verdict(run.results())}"])
+        avg = at.dataframe[0].value["avg ms"]
+        self.assertIn(f"({avg.astype(float).min()} ms)", shown()[0])  # the number is the one in the table below it
+        self.assertIn("No algorithm failed a request", shown()[0])
+        at.radio[0].set_value("Live view").run()
+        self.assertEqual(shown(), [])
+
+    def test_each_algorithm_line_has_its_own_dash_pattern_and_every_gloss_is_there(self):
+        at, run, clock = open_app()
+        def glosses(where, text):
+            return [m.value for m in where.markdown if text in m.value]
+
+        self.assertEqual(len(glosses(at.sidebar, "Takes turns: each request goes to the next server in line")), 1)
+        self.assertEqual(len(glosses(at.main, "Each bar is one server")), 2)
+        self.assertEqual(list(at.caption), [])  # st.caption's grey is too faint on the light theme
+        for g in glosses(at, "class='gloss'"):
+            self.assertIn("color:#475569", g)  # the palette's muted colour (AppTest has no browser theme: light)
+        at.button(key="start").click().run()
+        clock.t = 40.0
+        at.run()
+        at.radio[0].set_value("Compare all 3").run()
+        self.assertEqual(len(glosses(at.main, "Each bar is one server")), 3)
+        charts = 0
+        for el in at.main:
+            if getattr(el, "type", None) != "vega_lite_chart":
+                continue
+            enc = json.loads(el.proto.spec)["encoding"]
+            if "strokeDash" not in enc:
+                continue
+            charts += 1
+            dash, color = enc["strokeDash"], enc["color"]
+            self.assertEqual(dash["scale"]["domain"], NAMES)
+            self.assertEqual(dash["scale"]["domain"], color["scale"]["domain"])
+            self.assertEqual(len({tuple(d) for d in dash["scale"]["range"]}), len(NAMES))  # three different patterns
+            self.assertEqual(dash["legend"], color["legend"])  # so Vega-Lite draws one merged legend, not two
+            self.assertEqual(color["scale"]["range"], ["#d97706", "#4c78a8", "#2f9e44"])  # colours unchanged
+        self.assertEqual(charts, 2)
 
 
 if __name__ == "__main__":
