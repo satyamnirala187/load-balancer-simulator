@@ -49,6 +49,8 @@ down ("refused"), or if the server is at its connection limit ("overloaded").
 
 ## 3. Complexity analysis
 
+Standalone version with pseudocode and per-operation time and space: [docs/COMPLEXITY.pdf](docs/COMPLEXITY.pdf).
+
 Let n be the number of servers, R the number of requests, and m the number of requests in flight at one moment.
 
 ### 3.1 The heap
