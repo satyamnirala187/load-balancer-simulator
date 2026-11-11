@@ -1,0 +1,15 @@
+# Dashboard colours (ui-ux-pro-max "Status Page / Incident Management" palette), one set per theme.
+# The chart colours live in dashboard.py and are not themed.
+[theme.light]
+primaryColor = "#16A34A"
+backgroundColor = "#F0FDF4"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#14532D"
+borderColor = "#BBF7D0"
+
+[theme.dark]
+primaryColor = "#16A34A"
+backgroundColor = "#0F172A"
+secondaryBackgroundColor = "#111827"
+textColor = "#F8FAFC"
+borderColor = "#334155"

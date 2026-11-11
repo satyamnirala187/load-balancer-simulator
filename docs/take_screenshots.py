@@ -129,7 +129,7 @@ def main():
             p.click("[...document.querySelectorAll('label')].find(l => l.innerText.trim() === 'Compare all 3')", "compare view")
             time.sleep(2)
             p.shot("02_compare_view.png")
-            p.js("(() => { const m = document.querySelector('[data-testid=\"stMain\"]'); const c = [...document.querySelectorAll('[data-testid=\"stCaptionContainer\"]')].find(e => e.innerText.startsWith('Failover')); m.scrollTo(0, c.getBoundingClientRect().top + m.scrollTop - 60); })()")
+            p.js("(() => { const m = document.querySelector('[data-testid=\"stMain\"]'); const c = [...document.querySelectorAll('.gloss')].find(e => e.innerText.startsWith('Failover')); m.scrollTo(0, c.getBoundingClientRect().top + m.scrollTop - 60); })()")
             time.sleep(1)
             p.shot("03_compare_tables.png")
     finally:
