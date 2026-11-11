@@ -10,6 +10,7 @@ live Streamlit dashboard. The simulator itself uses only the Python 3 standard l
 | Document | What it is |
 |---|---|
 | [REPORT.md](REPORT.md) | complexity analysis, design decisions, measured results, honest limits |
+| [docs/COMPLEXITY.pdf](docs/COMPLEXITY.pdf) | the complexity analysis on its own: pseudocode and time and space for every algorithm and operation (source: [docs/COMPLEXITY.md](docs/COMPLEXITY.md)) |
 | [slides/RailDhaara_LoadBalancer.pptx](slides/RailDhaara_LoadBalancer.pptx) | the 10-slide deck |
 | [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) | word-for-word 12-minute demo, with the fallback if the dashboard fails |
 | [docs/VIVA.md](docs/VIVA.md) | answers to the likely viva questions |
