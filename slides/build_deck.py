@@ -35,10 +35,9 @@ from lbsim.traffic import make_scenario  # noqa: E402
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "RailDhaara_LoadBalancer.pptx")
 SHOT = os.path.join(ROOT, "docs", "screenshots", "01_live_view_after_kill.png")
-# The capture ends mid-way through the two line charts, and a plain crop above them still slices the sidebar's help text.
-# Row 1108 is blank in BOTH columns: below the Kill/Revive buttons and above their help text (sidebar), and below the bar
-# charts and above their legends (main area). The file in docs/ stays the full capture.
-SHOT_KEEP_PX = 1108
+# The live view fits one screen: the line charts' axis labels end at row 1174 of the 1350 px capture and the sidebar is
+# empty below the Run buttons, so cropping at 1200 drops only blank page. The file in docs/ stays the full capture.
+SHOT_KEEP_PX = 1200
 REPO = "github.com/satyamnirala187/load-balancer-simulator"
 PARTNER = "Raghav Sihag"
 

@@ -56,13 +56,13 @@ Tested with Streamlit 1.67.
 | Control | What it does |
 |---|---|
 | Pattern | Normal load / Sudden spike (Tatkal rush) / One slow server / Sudden 10x burst |
-| Algorithm (live view) | Which algorithm the **Live view** shows. All three always run, on the same traffic |
+| Algorithm | Which algorithm the **Live view** shows. All three always run, on the same traffic |
 | Speed | 1x-8x simulated seconds per real second |
 | Run settings | Seed, duration, base rate. Changing anything starts a fresh run |
 | Start / Pause / Reset | Run control |
-| Server + Kill / Revive | Stop or restart a server while the run is live. The same event hits all three algorithms |
+| Server + Kill / Revive | Under the Servers list in the Live view: stop or restart a server while the run is live. The same event hits all three algorithms |
 
-**Live view** (one algorithm): per-server status and counts, requests handled in the last 5 s, open connections, average latency and
+**Live view** (one algorithm): each server's weight and state with the Kill / Revive controls, requests handled in the last 5 s, open connections, average latency and
 throughput per second, and an event log (killed, marked down, revived, back in rotation).
 **Compare all 3**: three side-by-side per-server load panels, the same comparison / load / failover tables the CLI prints, latency and
 throughput for all three, and the CLI command that reproduces the run. The status line above both views counts requests "sent to a marked-down server": it must always read 0.
