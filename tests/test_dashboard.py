@@ -207,7 +207,9 @@ class DashboardTest(unittest.TestCase):
         panels = [m.value for m in at.markdown if m.value.startswith("#### ")]
         self.assertEqual(panels, [f"#### {n}" for n in NAMES])  # all three side by side
         self.assertEqual(len(bar_frames(at)), 3)
-        self.assertEqual(len(html_legends(at, "marked down")), 1)  # the state legend once, not under each chart
+        self.assertEqual(html_legends(at, "marked down"), [])  # no state legend: the live view's server list names the states
+        self.assertEqual([e.label for e in at.main.expander], ["What am I looking at?", "Load per server", "Failover details"])
+        self.assertFalse(any(e.proto.expanded for e in at.main.expander))  # one click away, not on screen
 
         tables = [df.values.tolist() for df in (d.value for d in at.dataframe)]  # comparison, load, failover
         self.assertEqual(len(tables), 3)
@@ -223,6 +225,24 @@ class DashboardTest(unittest.TestCase):
         cli = cli_rows(*shlex.split(cmd)[3:])
         for i, name in enumerate(NAMES):
             self.assertEqual(cli[name], [t[i] for t in tables], name)
+
+    def test_cli_command_wraps_on_screen_and_keeps_every_digit(self):
+        at, run, clock = open_app()
+        at.button(key="start").click().run()
+        clock.t = 9.370253918  # a click lands at an untidy moment: the command must keep all of it
+        at.run()
+        at.selectbox[2].set_value("app-3")
+        at.button(key="kill").click().run()
+        clock.t = 40.0
+        at.run()
+        at.radio[0].set_value("Compare all 3").run()
+        (code,) = at.code
+        self.assertTrue(code.proto.wrap_lines)  # wraps in the box instead of running off the right edge
+        kill = next(f.at_ms for f in run.results()[0].faults if not f.alive)
+        self.assertNotEqual(kill, round(kill))
+        self.assertEqual(code.value, f"python3 -m lbsim --pattern normal --seed 42 --duration 20 --rate 100 "
+                                     f"--kill-server app-3 --at {kill / 1000!r}s")
+        self.assertNotIn("\n", code.value)  # the wrapping is the browser's, not line breaks in the text
 
     def test_comparison_numbers_match_the_plain_cli_run(self):
         at, run, clock = open_app()
@@ -297,6 +317,9 @@ class DashboardTest(unittest.TestCase):
         cmd = at.code[0].value
         self.assertIn("--pattern spike", cmd)
         self.assertIn("--kill-server app-3 --at 9.0s", cmd)
+        sentence = [m.value for m in at.main.expander[2].markdown if "class='gloss'" in m.value]
+        self.assertEqual(len(sentence), 1)
+        self.assertIn(">app-3 killed at 9 s, marked down at 9.5 s (health check every 500 ms). Not revived.<", sentence[0])
         cli = cli_rows(*shlex.split(cmd)[3:])
         for i, name in enumerate(NAMES):
             self.assertEqual(cli[name], [t[i] for t in tables], name)
@@ -395,23 +418,29 @@ class DashboardTest(unittest.TestCase):
         def glosses(where, text):
             return [m.value for m in where.markdown if text in m.value]
 
-        self.assertEqual(len(glosses(at.sidebar, "Takes turns: each request goes to the next server in line")), 1)
-        self.assertEqual(len(glosses(at.main, "Each bar is one server")), 1)  # said once, in the state legend row
-        self.assertEqual(len(glosses(at.main, "Requests answered in the last 5 s.")), 1)  # one line under each bar chart
-        self.assertEqual(len(glosses(at.main, "Requests being served right now.")), 1)
+        # the sidebar holds only controls: the algorithm descriptions live in the "What am I looking at?" expander
+        self.assertEqual(glosses(at.sidebar, "Takes turns: each request goes to the next server in line"), [])
+        (explainer,) = [m.value for m in at.main.expander[0].markdown]
+        for text in page_function("ALGO_GLOSS").values():
+            self.assertIn(text, explainer)
+        # cut as repeats: the state legend (the server list says each state) and the lines under the bar charts
+        for gone in ("Each bar is one server", "Requests answered in the last 5 s.", "Requests being served right now.",
+                     "Handled in the last 5 s** ·"):
+            self.assertEqual(glosses(at.main, gone), [], gone)
         self.assertEqual(list(at.caption), [])  # st.caption's grey is too faint on the light theme
         for g in glosses(at, "class='gloss'"):
             self.assertIn("color:#4A4D55", g)  # the palette's muted colour (AppTest has no browser theme: light)
         for m in at.markdown:
             self.assertFalse(re.search("[\U0001F7E0-\U0001F7EB\U0001F534\U0001F535]", m.value), m.value)  # no emoji dots
-        self.assertEqual(len(glosses(at.main, "background:#4c78a8")), 2)  # squares in the chart's colour: legend + servers
+        self.assertEqual(len(glosses(at.main, "background:#4c78a8")), 1)  # squares in the chart's colour, in the server list
         at.button(key="start").click().run()
         clock.t = 40.0
         at.run()
         at.radio[0].set_value("Compare all 3").run()
-        self.assertEqual(len(glosses(at.main, "Each bar is one server")), 1)
-        for gloss in page_function("ALGO_GLOSS").values():  # only the per-algorithm line under each compare chart
-            self.assertEqual(len(glosses(at.main, gloss)), 1)
+        self.assertEqual(glosses(at.main, "Each bar is one server"), [])
+        self.assertEqual(glosses(at.main, "Same traffic through all three"), [])
+        for gloss in page_function("ALGO_GLOSS").values():  # one per-algorithm line under each compare chart
+            self.assertEqual(len(glosses(at.main, f"class='gloss' style='color:#4A4D55'>{gloss}")), 1)
         charts = 0
         for el in at.main:
             if getattr(el, "type", None) != "vega_lite_chart":
@@ -429,6 +458,26 @@ class DashboardTest(unittest.TestCase):
         self.assertEqual(charts, 2)
         (legend,) = html_legends(at, NAMES[0])  # the HTML legend shows the three dash styles too
         self.assertEqual(re.findall(r"border-top:\.2em (\w+) ", legend), ["solid", "dashed", "dotted"])
+
+
+@unittest.skipIf(AppTest is None, "needs streamlit: pip install -r requirements.txt")
+class FailoverSentenceTest(unittest.TestCase):
+    def sentence(self, faults, finished=True):
+        from lbsim.simulator import simulate
+        scenario = make_scenario("spike")
+        scenario.faults = faults
+        return page_function("failover_sentence")(simulate(ALGORITHMS[0], scenario), "app-3", 500, finished)
+
+    def test_no_revive_says_not_revived_never_revived_at_never(self):
+        text = self.sentence([Fault(9370.25, "app-3", False)])
+        self.assertEqual(text, "app-3 killed at 9.37 s, marked down at 9.5 s (health check every 500 ms). Not revived.")
+        self.assertNotIn("never", text)
+        self.assertTrue(self.sentence([Fault(9370.25, "app-3", False)], finished=False).endswith("Not revived yet."))
+
+    def test_a_revive_gives_both_times(self):
+        text = self.sentence([Fault(9000, "app-3", False), Fault(14500, "app-3", True)])
+        self.assertEqual(text, "app-3 killed at 9 s, marked down at 9.5 s (health check every 500 ms). "
+                               "Revived at 14.5 s, back in rotation at 15 s.")
 
 
 if __name__ == "__main__":

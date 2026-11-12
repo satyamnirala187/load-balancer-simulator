@@ -127,7 +127,7 @@ The run is only 20 seconds and the kill and revive are 5 seconds apart, so **use
 
 *34 words.*
 
-5. [Let it run to Finished (about 5 more seconds). Click **Compare all 3** and scroll to the failover table and the command-line box at the bottom.]
+5. [Let it run to Finished (about 5 more seconds). Click **Compare all 3**, open **Failover details**, and scroll down to the command-line box at the bottom.]
 
 > Here is what it cost. While the balancer did not know, Round Robin lost about 43 requests, Least Connections about 179, Weighted Least Connections about 172. After that, zero were routed to the dead server. While it was down, Weighted Least Connections still succeeded on about 91% of requests, the others about 79%. And this command line reproduces exactly this run, down to the moment we clicked.
 
@@ -136,7 +136,7 @@ The run is only 20 seconds and the kill and revive are 5 seconds apart, so **use
 **You should see (kill at 9 s, revive at 14.5 s; about):** failed 422 / 506 / 288; refused before the balancer noticed 43 / 179 / 172;
 routed while marked down 0 / 0 / 0; success while marked down 78.6% / 78.7% / 90.9%. Clicking a second earlier or later moves these by up to about 5 points; the refused counts and the zeros hold.
 **The orange state** (dead, not yet detected) lasts at most half a second, so you may only catch it for a refresh or two; the red and yellow states you can hold on the pause. Say "for a moment" and carry on.
-**If you miss the window** (Kill after 12 s, or no Pause): it still works, you just lose the timing. Skip the pause, say "and now we kill a server", and read the table at the end.
+**If you miss the window** (Kill after 12 s, or no Pause): it still works, you just lose the timing. Skip the pause, say "and now we kill a server", and read the table under **Failover details** at the end.
 **If you click Revive while it is running** it also works: the yellow state is just shorter.
 
 ### 9:00  Demo D: wrap up  (20 s)

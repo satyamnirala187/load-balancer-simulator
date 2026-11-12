@@ -132,7 +132,13 @@ def main():
             p.click("[...document.querySelectorAll('label')].find(l => l.innerText.trim() === 'Compare all 3')", "compare view")
             time.sleep(2)
             p.shot("02_compare_view.png")
-            p.js("(() => { const m = document.querySelector('[data-testid=\"stMain\"]'); const c = [...document.querySelectorAll('.gloss')].find(e => e.innerText.startsWith('Failover')); m.scrollTo(0, c.getBoundingClientRect().top + m.scrollTop - 60); })()")
+            failover = "[...document.querySelectorAll('summary')].find(e => e.innerText.includes('Failover details'))"
+            p.wait(f"!!({failover})", "Failover details")
+            p.js(f"({failover}).scrollIntoView({{block: 'center'}})")  # a click only lands inside the viewport
+            time.sleep(0.5)
+            p.click(failover, "Failover details")  # collapsed on the page; open it for the shot
+            time.sleep(1)
+            p.js(f"(() => {{ const m = document.querySelector('[data-testid=\"stMain\"]'); m.scrollTo(0, ({failover}).getBoundingClientRect().top + m.scrollTop - 60); }})()")
             time.sleep(1)
             p.shot("03_compare_tables.png")
     finally:
