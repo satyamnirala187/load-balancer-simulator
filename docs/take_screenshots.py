@@ -68,8 +68,8 @@ class Page:
         time.sleep(0.8)
 
     def sim_seconds(self):
-        text = self.js("[...document.querySelectorAll('[data-testid=\"stMetricValue\"]')].map(e => e.innerText)[1] || ''")
-        m = re.match(r"([\d.]+) s /", text or "")
+        text = self.js("document.querySelector('.status')?.innerText || ''")  # e.g. "Running · 9.0 s / 20 s · ..."
+        m = re.search(r"([\d.]+) s /", text)
         return float(m.group(1)) if m else 0.0
 
     def shot(self, name):
@@ -112,6 +112,8 @@ def main():
         with connect(target["webSocketDebuggerUrl"], max_size=None) as ws:
             p = Page(ws)
             p.call("Emulation.setDeviceMetricsOverride", width=1440, height=900, deviceScaleFactor=1.5, mobile=False)
+            # config.toml defines a light and a dark theme, so Streamlit follows the browser's colour scheme: ask for light
+            p.call("Emulation.setEmulatedMedia", features=[{"name": "prefers-color-scheme", "value": "light"}])
             p.call("Page.navigate", url=f"http://localhost:{APP_PORT}/")
             p.wait("document.body.innerText.includes('Ready')", "dashboard to load")
             p.pick(0, "Sudden spike (Tatkal rush)")
@@ -124,6 +126,7 @@ def main():
             p.button("Kill")
             while p.sim_seconds() < 14.6:  # past detection (0.5 s) and past the rush: app-3's bar has drained
                 time.sleep(0.05)
+            p.js("document.querySelectorAll('[data-testid=\"stToast\"]').forEach(t => t.remove())")  # it covers the disclaimer
             p.shot("01_live_view_after_kill.png")
             p.wait("document.body.innerText.includes('Finished')", "run to finish", 30)
             p.click("[...document.querySelectorAll('label')].find(l => l.innerText.trim() === 'Compare all 3')", "compare view")

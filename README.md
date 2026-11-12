@@ -65,7 +65,7 @@ Tested with Streamlit 1.67.
 **Live view** (one algorithm): per-server status and counts, requests handled in the last 5 s, open connections, average latency and
 throughput per second, and an event log (killed, marked down, revived, back in rotation).
 **Compare all 3**: three side-by-side per-server load panels, the same comparison / load / failover tables the CLI prints, latency and
-throughput for all three, and the CLI command that reproduces the run. The status row's "Sent to a marked-down server" must always read 0.
+throughput for all three, and the CLI command that reproduces the run. The status line above both views counts requests "sent to a marked-down server": it must always read 0.
 
 **Same numbers as the CLI.** The dashboard and the CLI share one engine (`lbsim.simulator.Simulation`) and one table builder
 (`lbsim.report`). The Compare view prints the exact CLI command for the run, including the moment you pressed Kill; once the run has

@@ -117,9 +117,9 @@ The run is only 20 seconds and the kill and revive are 5 seconds apart, so **use
 
 3. [At about **14.5 seconds**, click **Pause**. The screen freezes with app-3 red, its bar at zero.] Speak:
 
-> Look at the top right: sent to a marked-down server, zero. Nothing is routed to it. Its bar has drained to nothing, and the others have picked up its share.
+> Look at the status line at the top: zero sent to a marked-down server. Nothing is routed to it. Its bar has drained to nothing, and the others have picked up its share.
 
-*30 words.*
+*34 words.*
 
 4. [Still paused, click **Revive**. app-3 turns yellow: alive, not back in rotation.] Speak, and click **Start** (the button now says Start) at "when we resume":
 

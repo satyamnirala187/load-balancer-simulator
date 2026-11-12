@@ -52,7 +52,7 @@ RGB = {k: RGBColor.from_string(v) for k, v in THEME.items()}
 ALGO_COLOR = {"Round Robin": "accent2", "Least Connections": "accent1", "Weighted Least Conn.": "accent3"}
 
 # Numbers on the slides that are not measurements: design constants and the illustrative heap example.
-STRUCTURAL = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "27", "390", "9.6", "0.20", "0.25", "0.33", "0.67", "17",
+STRUCTURAL = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "27", "390", "0.20", "0.25", "0.33", "0.67", "17",
               "100", "400", "1,000", "100,000", "50,000", "0.5", "2026", "42"}  # 42 = the seed
 
 
@@ -497,7 +497,7 @@ def slide_dashboard(prs, layout):
     pic.line.width = Pt(1)
     alt(pic, "Dashboard Live view during a Tatkal-rush run: app-3 is marked down, its bar has dropped to zero and the others carry its load.")
     text(s, W - LEFT - pic_w, 1.65 + pic_w / aspect + 0.1, pic_w, 0.3,
-         "One live run: Tatkal rush, app-3 killed at 9.6 s. Counts differ from the tables, which use fixed scenarios.",
+         "One live run: Tatkal rush, app-3 killed mid-rush. Counts differ from the tables, which use fixed scenarios.",
          size=11, color="dk2")
     items = [("Live view", "Per-server status, load in the last 5 s, open connections, latency and throughput."),
              ("Compare view", "All three algorithms on the same traffic, side by side."),
