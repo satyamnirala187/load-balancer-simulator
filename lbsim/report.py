@@ -46,9 +46,11 @@ def failover_title(result, server_id, interval_ms, never="never", passive_after=
     `never` is what to print for something that has not happened (a live run says "not yet")."""
     f = failover(result, server_id)
     passive = f", or after {passive_after} refused requests" if passive_after else ""
-    return (f"Failover: {server_id} killed at {secs(f.kill_ms)}, marked down at {secs(f.detect_ms, never)} "
-            f"(health check every {interval_ms:g} ms{passive}), revived at {secs(f.revive_ms, never)}, "
-            f"back in rotation at {secs(f.recover_ms, never)}")
+    head = (f"Failover: {server_id} killed at {secs(f.kill_ms)}, marked down at {secs(f.detect_ms, never)} "
+            f"(health check every {interval_ms:g} ms{passive})")
+    if math.isinf(f.revive_ms):
+        return head + ". Not revived."
+    return head + f", revived at {secs(f.revive_ms, never)}, back in rotation at {secs(f.recover_ms, never)}"
 
 
 def cli_command(pattern, seed, duration_s, rate, faults):

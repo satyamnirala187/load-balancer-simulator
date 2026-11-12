@@ -121,6 +121,13 @@ class CliTest(unittest.TestCase):
                     self.assertIn(alg.name, t)
             self.assertEqual("Failover:" in out, bool(args))
 
+    def test_a_kill_without_a_revive_says_not_revived(self):
+        out = run_cli("--pattern", "spike", "--kill-server", "app-3", "--at", "9s")
+        self.assertIn("Failover: app-3 killed at 9s, marked down at 9.5s (health check every 500 ms). Not revived.\n", out)
+        self.assertNotIn("never", out)
+        out = run_cli("--pattern", "spike", "--kill-server", "app-3", "--at", "9s", "--revive-at", "14.5s")
+        self.assertIn(", revived at 14.5s, back in rotation at 15s\n", out)  # with a revive the line is unchanged
+
     def test_bad_flags_are_rejected(self):
         for args in (["--kill-server", "app-9", "--at", "5s"], ["--kill-server", "app-3"], ["--at", "5s"],
                      ["--kill-server", "app-3", "--at", "30s"], ["--kill-server", "app-3", "--at", "8s", "--revive-at", "5s"],

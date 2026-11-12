@@ -105,9 +105,15 @@ def lines(columns, t, y_title, height=340, x_title="simulated seconds"):
     st.altair_chart(chart.properties(height=height).configure_axis(**AXIS), width="stretch")
 
 
+# Shorter column labels on screen only: inside the "Failover details" expander the full headers overflow at 1440 px.
+# Both keep "marked down" (the balancer's belief, not "dead"); the CLI and the table data keep lbsim.report's headers.
+SHORT_HEADER = {"routed while marked down": "routed, marked down", "success % while marked down": "success %, marked down"}
+
+
 def show_table(table):
     headers, rows = table
-    st.dataframe(pd.DataFrame(rows, columns=headers), hide_index=True, width="stretch")
+    st.dataframe(pd.DataFrame(rows, columns=headers), hide_index=True, width="stretch",
+                 column_config={h: SHORT_HEADER[h] for h in headers if h in SHORT_HEADER} or None)
 
 
 def failover_sentence(result, server_id, interval_ms, finished):
@@ -222,6 +228,11 @@ def compare_view(run, results):
             b.metric("avg latency", f"{r.avg_latency_ms:.1f} ms")
             bars(r.load, states_of(run.sims[r.algorithm]), "requests", ymax)
             gloss(ALGO_GLOSS[r.algorithm])
+    states = states_of(run.sims[results[0].algorithm])  # same kills, same checks: the same states for all three
+    red = [s for s in states if states[s] == "marked down"]
+    if red:  # the key the removed legend gave: say which bar is red, and only when one is
+        gloss(f"Red bar{'s' if len(red) > 1 else ''}: {' and '.join(red)}, the server{'s' if len(red) > 1 else ''} "
+              f"that {'were' if len(red) > 1 else 'was'} killed.")
     show_table(comparison_table(results))
     with st.expander("Load per server"):
         show_table(load_table(results))

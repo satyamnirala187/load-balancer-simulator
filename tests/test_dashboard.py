@@ -208,6 +208,7 @@ class DashboardTest(unittest.TestCase):
         self.assertEqual(panels, [f"#### {n}" for n in NAMES])  # all three side by side
         self.assertEqual(len(bar_frames(at)), 3)
         self.assertEqual(html_legends(at, "marked down"), [])  # no state legend: the live view's server list names the states
+        self.assertFalse(any("Red bar" in m.value for m in at.main.markdown))  # revived and back in rotation: no red bar
         self.assertEqual([e.label for e in at.main.expander], ["What am I looking at?", "Load per server", "Failover details"])
         self.assertFalse(any(e.proto.expanded for e in at.main.expander))  # one click away, not on screen
 
@@ -243,6 +244,26 @@ class DashboardTest(unittest.TestCase):
         self.assertEqual(code.value, f"python3 -m lbsim --pattern normal --seed 42 --duration 20 --rate 100 "
                                      f"--kill-server app-3 --at {kill / 1000!r}s")
         self.assertNotIn("\n", code.value)  # the wrapping is the browser's, not line breaks in the text
+
+    def test_red_bar_is_named_only_when_a_killed_server_is_marked_down(self):
+        def key(at):
+            return [m.value for m in at.main.markdown if "Red bar" in m.value]
+
+        for beat, expected in ((3, ["Red bar: app-3, the server that was killed."]), (2, [])):
+            with self.subTest(beat=beat):
+                at, _, _ = open_app()
+                at.button(key=f"beat{beat}").click().run()
+                clock = Clock()
+                run = at.session_state["run"]
+                run.clock, run.speed = clock, 1
+                at.select_slider[0].set_value(1).run()
+                at.button(key="start").click().run()
+                clock.t = 40.0
+                at.run()
+                at.radio[0].set_value("Compare all 3").run()
+                self.assertEqual([re.sub(r"<[^>]+>", "", v) for v in key(at)], expected)
+                if expected:
+                    self.assertIn("class='gloss'", key(at)[0])
 
     def test_comparison_numbers_match_the_plain_cli_run(self):
         at, run, clock = open_app()
