@@ -10,10 +10,9 @@ import streamlit as st
 
 from lbsim.algorithms import ALGORITHMS
 from lbsim.live import LiveRun
-from lbsim.report import (cli_command, comparison_table, failover_table, failover_title, load_table,
-                          recent_load, timeseries)
+from lbsim.report import cli_command, comparison_table, failover_table, load_table, recent_load, timeseries
 from lbsim.servers import FLEET
-from lbsim.simulator import routed_while_marked_down
+from lbsim.simulator import failover, routed_while_marked_down
 from lbsim.traffic import Fault, make_scenario
 
 PATTERNS = {"normal": "Normal load", "spike": "Sudden spike (Tatkal rush)", "slow_server": "One slow server",
@@ -82,14 +81,10 @@ def legend(marks):
                 + "</div>", unsafe_allow_html=True)
 
 
-def state_legend():
-    legend({"Each bar is one server, coloured by its state:": ""} | {STATE_LABEL[state]: square(state) for state in STATE_COLOR})
-
-
 def bars(values, states, y_title, ymax=None, height=240):
     df = pd.DataFrame({"server": list(values), "count": list(values.values()), "state": [states[k] for k in values]})
     y = alt.Y("count:Q", title=y_title, scale=alt.Scale(domain=[0, max(ymax or 0, max(values.values()), 1)]))
-    color = alt.Color("state:N", legend=None,  # see state_legend()
+    color = alt.Color("state:N", legend=None,  # the live view's server list names each colour's state
                       scale=alt.Scale(domain=list(STATE_COLOR), range=list(STATE_COLOR.values())))
     chart = alt.Chart(df).mark_bar().encode(x=alt.X("server:N", sort=None, title=None, axis=alt.Axis(labelAngle=0)),
                                             y=y, color=color, tooltip=["server", "count", "state"])
@@ -113,6 +108,22 @@ def lines(columns, t, y_title, height=340, x_title="simulated seconds"):
 def show_table(table):
     headers, rows = table
     st.dataframe(pd.DataFrame(rows, columns=headers), hide_index=True, width="stretch")
+
+
+def failover_sentence(result, server_id, interval_ms, finished):
+    """The failover times in words, e.g. `app-3 killed at 9.37 s, marked down at 9.5 s (health check every 500 ms).
+    Not revived.` Rounded for reading; the table and the CLI command keep the exact figures."""
+    f = failover(result, server_id)
+    later = "never " if finished else "not "  # an infinite time: it did not happen, or has not happened yet
+    yet = "" if finished else " yet"
+
+    def at(what, ms):
+        return f"{later}{what}{yet}" if ms == float("inf") else f"{what} at {round(ms / 1000, 2):g} s"
+
+    text = f"{server_id} {at('killed', f.kill_ms)}, {at('marked down', f.detect_ms)} (health check every {interval_ms:g} ms)."
+    if f.revive_ms == float("inf"):
+        return text + (" Not revived." if finished else " Not revived yet.")
+    return text + f" {at('Revived', f.revive_ms)}, {at('back in rotation', f.recover_ms)}."
 
 
 def verdict(results):
@@ -176,7 +187,6 @@ def live_view(run, results, r):
     """Three columns that fit one screen: a 20 s run leaves no time to scroll."""
     sim = run.sims[r.algorithm]
     states, load = states_of(sim), r.load
-    state_legend()
     side, left, right = st.columns([5, 4, 4])
     with side:
         st.markdown("**Servers**<br>" + "<br>".join(
@@ -186,9 +196,8 @@ def live_view(run, results, r):
         events(sim, run.now_ms, run.scenario.faults)
     ts = timeseries(r.records, upto_ms=run.now_ms)
     with left:
-        st.markdown(f"**Handled in the last 5 s** · {r.algorithm}")
+        st.markdown("**Handled in the last 5 s**")
         bars(recent_load(r.records, list(load), run.now_ms), states, "requests", height=LIVE_BARS)
-        gloss("Requests answered in the last 5 s.")
         if ts["t"]:
             st.markdown("**Average latency per second**")
             lines({"avg latency (ms)": ts["avg_ms"]}, ts["t"], "ms", LIVE_LINES, x_title=None)
@@ -197,7 +206,6 @@ def live_view(run, results, r):
     with right:
         st.markdown("**Open connections right now**")
         bars({s.id: s.connections for s in sim.servers}, states, "connections", height=LIVE_BARS)
-        gloss("Requests being served right now.")
         if ts["t"]:
             st.markdown(f"**Throughput per second**<br>{stroke('served')}served &nbsp; {stroke('failed')}failed",
                         unsafe_allow_html=True)
@@ -205,8 +213,6 @@ def live_view(run, results, r):
 
 
 def compare_view(run, results):
-    st.markdown("**Same traffic through all three algorithms:** the requests each server has answered so far.")
-    state_legend()
     ymax = max(max(r.load.values()) for r in results)
     for col, r in zip(st.columns(3), results):
         with col:
@@ -217,11 +223,15 @@ def compare_view(run, results):
             bars(r.load, states_of(run.sims[r.algorithm]), "requests", ymax)
             gloss(ALGO_GLOSS[r.algorithm])
     show_table(comparison_table(results))
-    show_table(load_table(results))
+    with st.expander("Load per server"):
+        show_table(load_table(results))
     # a kill scheduled by story beat 3 only gets its table once it has happened
-    for sid in sorted({f.server_id for f in results[0].faults if not f.alive and f.at_ms <= run.now_ms}):
-        gloss(failover_title(results[0], sid, run.interval_ms, never="never" if run.finished else "(not yet)"))
-        show_table(failover_table(results, sid))
+    killed = sorted({f.server_id for f in results[0].faults if not f.alive and f.at_ms <= run.now_ms})
+    if killed:
+        with st.expander("Failover details"):
+            for sid in killed:
+                gloss(failover_sentence(results[0], sid, run.interval_ms, run.finished))
+                show_table(failover_table(results, sid))
     ts = {r.algorithm: timeseries(r.records, upto_ms=run.now_ms) for r in results}
     t = ts[results[0].algorithm]["t"]
     if t:
@@ -237,7 +247,7 @@ def compare_view(run, results):
     gloss("The same run from the command line (numbers are identical once the run has finished):"
           if cmd else "This sequence of kills needs more than one CLI command, so there is no single CLI equivalent.")
     if cmd:
-        st.code(cmd, language="bash")
+        st.code(cmd, language="bash", wrap_lines=True)  # display only: the text keeps every digit
 
 
 def panel(run, view, algo, polling):
@@ -286,7 +296,6 @@ with st.sidebar:
     st.header("Traffic")
     pattern = st.selectbox("Pattern", list(PATTERNS), format_func=PATTERNS.get, key="pattern")
     algo = st.selectbox("Algorithm (live view)", [a.name for a in ALGORITHMS])
-    gloss(ALGO_GLOSS[algo])
     speed = st.select_slider("Speed", [1, 2, 4, 8], value=2, format_func=lambda x: f"{x}x")
     with st.expander("Run settings"):
         seed = st.number_input("Seed", value=42, step=1)
@@ -348,6 +357,7 @@ with info.expander("What am I looking at?"):
                 f"{', '.join(str(f[1]) for f in FLEET)}) share the incoming booking requests.\n"
                 "- **The question:** which rule for picking the next server (the algorithm) fails the fewest requests "
                 "and answers the fastest.\n"
+                + "".join(f"- **{name}:** {text}\n" for name, text in ALGO_GLOSS.items()) +
                 "- **How to use it:** pick a story beat above, press **Start** in the sidebar, then open *Compare all 3* "
                 "to see the same traffic through all three rules.")
 st.fragment(panel, run_every=REFRESH_S if run.running else None)(run, view, algo, run.running)
