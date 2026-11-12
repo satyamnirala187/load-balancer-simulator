@@ -7,7 +7,7 @@ whatever you actually ran, so you can always check a figure.
 ## Before you start (10 minutes ahead)
 
 1. Terminal 1, in the project folder: `.venv/bin/streamlit run dashboard.py`. Open http://localhost:8501 in a desktop browser window at least 1280 px wide, zoom 100%. The sidebar must be open.
-2. In the sidebar set **Speed to 1x** (click the slider thumb and press the Left arrow once, or drag it to the far left; the label above it should read 1x). Pattern: **Normal load**. Algorithm (live view): **Weighted Least Conn.**. Server: **app-3**. Leave Run settings alone (seed 42, 20 s, 100 req/s): the numbers below depend on them.
+2. In the sidebar set **Speed to 1x** (click the slider thumb and press the Left arrow once, or drag it to the far left; the label above it should read 1x). Pattern: **Normal load**. Algorithm: **Weighted Least Conn.**. Under the Servers list on the page, Server: **app-3**. Leave Run settings alone (seed 42, 20 s, 100 req/s): the numbers below depend on them.
 3. Press **Start** and let one run finish, then press **Reset**. This checks that everything works and warms the page.
 4. Terminal 2, in the project folder, ready for the fallback (section "If something fails"). Open `docs/fallback/` in a text viewer too.
 5. Slides open in presenter view.
@@ -103,7 +103,7 @@ The spoken text is about 9 minutes at a steady pace; the rest is the simulation 
 
 The run is only 20 seconds and the kill and revive are 5 seconds apart, so **use Pause** to talk on a frozen screen. The sequence is: Start, Kill at 9 s, Pause at 14.5 s, Revive, Start again.
 
-1. [Click **Reset**. Pattern stays on *Sudden spike*. Check that *Server* says **app-3** and that the **Live view** is showing. Click **Start**.] Speak while the clock runs to 9 seconds:
+1. [Click **Reset**. Pattern stays on *Sudden spike*. Check that the **Live view** is showing and that *Server*, under the Servers list, says **app-3**. Click **Start**.] Speak while the clock runs to 9 seconds:
 
 > Same rush again. Watch the clock. At 9 seconds, in the middle of the rush, we kill app-3.
 

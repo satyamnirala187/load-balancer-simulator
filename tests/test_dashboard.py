@@ -79,10 +79,11 @@ class DashboardTest(unittest.TestCase):
     def test_loads_without_errors_with_every_control(self):
         at, run, clock = open_app()
         self.assertEqual(list(at.exception), [])
-        self.assertEqual([s.label for s in at.selectbox], ["Pattern", "Algorithm (live view)", "Server"])
-        self.assertEqual(at.selectbox[0].options, ["Normal load", "Sudden spike (Tatkal rush)", "One slow server",
+        self.assertEqual([s.label for s in at.sidebar.selectbox], ["Pattern", "Algorithm"])
+        self.assertEqual([s.label for s in at.main.selectbox], ["Server"])
+        self.assertEqual(at.sidebar.selectbox[0].options, ["Normal load", "Sudden spike (Tatkal rush)", "One slow server",
                                                    "Sudden 10x burst"])
-        self.assertEqual(at.selectbox[1].options, NAMES)
+        self.assertEqual(at.sidebar.selectbox[1].options, NAMES)
         self.assertEqual(at.radio[0].options, ["Live view", "Compare all 3"])
         self.assertEqual({b.key: b.disabled for b in at.button},
                          {"start": False, "reset": False, "kill": True, "revive": True,  # nothing to kill yet
@@ -95,9 +96,9 @@ class DashboardTest(unittest.TestCase):
         for view in ("Live view", "Compare all 3"):
             at.radio[0].set_value(view)
             for pattern in ("normal", "spike", "slow_server", "burst"):
-                at.selectbox[0].set_value(pattern)  # AppTest takes the raw value, the page shows the label
+                at.sidebar.selectbox[0].set_value(pattern)  # AppTest takes the raw value, the page shows the label
                 for name in NAMES:
-                    at.selectbox[1].set_value(name).run()
+                    at.sidebar.selectbox[1].set_value(name).run()
                     with self.subTest(f"{view}/{pattern}/{name}"):
                         self.assertEqual(list(at.exception), [])
                         self.assertEqual(at.session_state["run"].scenario.name, pattern)  # new pattern = new run
@@ -113,7 +114,7 @@ class DashboardTest(unittest.TestCase):
         before = bar_frames(at)[0]["count"]  # "handled in the last 5 s"
         self.assertTrue((before > 0).all(), before.to_dict())  # every server is taking traffic
 
-        at.selectbox[2].set_value("app-3")
+        at.selectbox(key="target").set_value("app-3")
         at.button(key="kill").click().run()
         clock.t = 17.0  # health check noticed at 10.5; the 5 s window now holds only post-detection traffic
         at.run()
@@ -134,6 +135,25 @@ class DashboardTest(unittest.TestCase):
         self.assertEqual(recent.loc["app-3", "state"], "up")
         self.assertGreater(recent.loc["app-3", "count"], 0)  # traffic came back
         self.assertEqual(metric(at, "Sent to a marked-down server"), "0")
+
+    def test_server_list_is_one_line_per_server_with_its_kill_controls_below(self):
+        at, run, clock = open_app()
+        (servers,) = [m.value for m in at.main.markdown if m.value.startswith("**Servers**")]
+        lines = re.sub(r"<span[^>]*></span>", "", servers).split("<br>")[1:]  # drop the heading and the colour squares
+        fleet = [s for s in run.sims[NAMES[0]].servers]
+        self.assertEqual(lines, [f"<b>{s.id}</b> · weight {s.weight} · up" for s in fleet])  # id, weight, state in words
+        at.button(key="start").click().run()
+        clock.t = 10.0
+        at.run()
+        (servers,) = [m.value for m in at.main.markdown if m.value.startswith("**Servers**")]
+        self.assertEqual(servers.count("<br>"), len(fleet))  # still one line each once requests are flowing ...
+        self.assertNotIn("open", servers)  # ... and no counts: the two bar charts carry them
+        self.assertNotIn("handled", servers)
+        # Kill / Revive and their picker live in the main area, beside the servers; the sidebar has only Traffic and Run
+        self.assertEqual({b.key for b in at.main.button} & {"kill", "revive"}, {"kill", "revive"})
+        self.assertEqual({b.key for b in at.sidebar.button}, {"start", "reset"})
+        self.assertEqual([h.value for h in at.sidebar.header], ["Traffic", "Run"])
+        self.assertFalse(any("Failure injection" in m.value for m in list(at.sidebar.markdown) + list(at.sidebar.header)))
 
     def test_narrow_screen_and_light_theme_fixes_stay_in_place(self):
         # found in the browser at 390 px / light theme: no hint that the controls hide in the sidebar, line-chart
@@ -193,7 +213,7 @@ class DashboardTest(unittest.TestCase):
         at.button(key="start").click().run()
         clock.t = 10.2
         at.run()
-        at.selectbox[2].set_value("app-3")
+        at.selectbox(key="target").set_value("app-3")
         at.button(key="kill").click().run()
         clock.t = 15.0
         at.button(key="revive").click().run()
@@ -232,7 +252,7 @@ class DashboardTest(unittest.TestCase):
         at.button(key="start").click().run()
         clock.t = 9.370253918  # a click lands at an untidy moment: the command must keep all of it
         at.run()
-        at.selectbox[2].set_value("app-3")
+        at.selectbox(key="target").set_value("app-3")
         at.button(key="kill").click().run()
         clock.t = 40.0
         at.run()
@@ -295,7 +315,7 @@ class DashboardTest(unittest.TestCase):
         self.assertIsNot(fresh, run)  # the beat reset the run ...
         self.assertFalse(fresh.started)  # ... and left Start to the presenter
         self.assertEqual((fresh.scenario.name, fresh.scenario.faults), ("spike", []))
-        self.assertEqual(at.selectbox[0].value, "spike")  # the sidebar shows what the beat chose
+        self.assertEqual(at.sidebar.selectbox[0].value, "spike")  # the sidebar shows what the beat chose
         self.assertEqual(active(), ["beat2"])
         self.assertIn("Beat 2: Tatkal rush", at.toast[0].value)
 
@@ -311,10 +331,10 @@ class DashboardTest(unittest.TestCase):
         at.button(key="reset").click().run()  # Reset keeps the beat, kill included
         self.assertEqual(at.session_state["run"].scenario.faults, [Fault(9000.0, "app-3", False)])
 
-        at.selectbox[0].set_value("burst").run()  # a pattern picked by hand ends the story beat
+        at.sidebar.selectbox[0].set_value("burst").run()  # a pattern picked by hand ends the story beat
         self.assertEqual(active(), [])
         self.assertEqual(at.session_state["run"].scenario.faults, [])
-        at.selectbox[0].set_value("spike").run()
+        at.sidebar.selectbox[0].set_value("spike").run()
         self.assertEqual(at.session_state["run"].scenario.faults, [])  # and it does not come back by itself
 
     def test_beat_three_kills_the_server_on_schedule_and_matches_the_cli(self):
@@ -424,15 +444,19 @@ class DashboardTest(unittest.TestCase):
 
     def test_kill_target_defaults_to_the_server_the_beat_is_about(self):
         at, run, clock = open_app()
-        self.assertEqual(at.selectbox[2].value, "app-1")
+        self.assertEqual(at.selectbox(key="target").value, "app-1")
         at.button(key="beat2").click().run()
-        self.assertEqual(at.selectbox[2].value, "app-1")  # no server dies in beat 2, so nothing to point at
+        self.assertEqual(at.selectbox(key="target").value, "app-1")  # no server dies in beat 2, so nothing to point at
         at.button(key="beat3").click().run()
-        self.assertEqual(at.selectbox[2].value, "app-3")  # the server beat 3 kills: Revive is one click away
-        at.selectbox[2].set_value("app-5").run()
-        self.assertEqual(at.selectbox[2].value, "app-5")  # still the presenter's to change
+        self.assertEqual(at.selectbox(key="target").value, "app-3")  # the server beat 3 kills: Revive is one click away
+        at.radio[0].set_value("Compare all 3").run()  # the picker is not drawn here ...
+        self.assertEqual(at.main.selectbox, [])
+        at.radio[0].set_value("Live view").run()
+        self.assertEqual(at.selectbox(key="target").value, "app-3")  # ... and still remembers the beat's server
+        at.selectbox(key="target").set_value("app-5").run()
+        self.assertEqual(at.selectbox(key="target").value, "app-5")  # still the presenter's to change
         at.button(key="reset").click().run()
-        self.assertEqual(at.selectbox[2].value, "app-5")
+        self.assertEqual(at.selectbox(key="target").value, "app-5")
 
     def test_each_algorithm_line_has_its_own_dash_pattern_and_every_gloss_is_there(self):
         at, run, clock = open_app()

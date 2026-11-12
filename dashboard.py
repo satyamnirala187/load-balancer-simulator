@@ -189,16 +189,36 @@ def events(sim, now_ms, planned):
         gloss("No server has been killed or revived yet.")
 
 
+def kill_or_revive(alive):
+    """Kill / Revive callback. It runs before the rerun, so the server list already shows the change, even while paused
+    (a paused run's panel does not refresh by itself)."""
+    run, target = st.session_state.run, st.session_state.target
+    if alive:
+        st.toast(f"{target} revived at {run.now_ms / 1000:.1f} s" if run.revive(target) else f"{target} is already up")
+    else:
+        st.toast(f"{target} killed at {run.now_ms / 1000:.1f} s" if run.kill(target) else f"{target} is already down")
+
+
+def failure_controls(run):
+    """Server picker and Kill / Revive, under the server list they act on."""
+    live = run.started and not run.finished
+    pick, kill, revive = st.columns([2, 1, 1], vertical_alignment="bottom")
+    pick.selectbox("Server", [f[0] for f in FLEET], key="target")
+    kill.button("Kill", key="kill", disabled=not live, on_click=kill_or_revive, args=(False,), width="stretch")
+    revive.button("Revive", key="revive", disabled=not live, on_click=kill_or_revive, args=(True,), width="stretch")
+
+
 def live_view(run, results, r):
     """Three columns that fit one screen: a 20 s run leaves no time to scroll."""
     sim = run.sims[r.algorithm]
     states, load = states_of(sim), r.load
     side, left, right = st.columns([5, 4, 4])
     with side:
+        # one line per server: its counts are the two bar charts' job
         st.markdown("**Servers**<br>" + "<br>".join(
-            f"{square(states[s.id])}<b>{s.id}</b> · weight {s.weight} · {STATE_LABEL[states[s.id]]}<br>"
-            f"<span class='gloss' style='color:{MUTED};margin-left:1.15em'>{s.connections} open · {load[s.id]} handled</span>"
-            for s in sim.servers), unsafe_allow_html=True)
+            f"{square(states[s.id])}<b>{s.id}</b> · weight {s.weight} · {STATE_LABEL[states[s.id]]}" for s in sim.servers),
+            unsafe_allow_html=True)
+        failure_controls(run)
         events(sim, run.now_ms, run.scenario.faults)
     ts = timeseries(r.records, upto_ms=run.now_ms)
     with left:
@@ -306,7 +326,7 @@ def set_beat(n):
 with st.sidebar:
     st.header("Traffic")
     pattern = st.selectbox("Pattern", list(PATTERNS), format_func=PATTERNS.get, key="pattern")
-    algo = st.selectbox("Algorithm (live view)", [a.name for a in ALGORITHMS])
+    algo = st.selectbox("Algorithm", [a.name for a in ALGORITHMS])
     speed = st.select_slider("Speed", [1, 2, 4, 8], value=2, format_func=lambda x: f"{x}x")
     with st.expander("Run settings"):
         seed = st.number_input("Seed", value=42, step=1)
@@ -329,16 +349,9 @@ with st.sidebar:
              width="stretch")
     if b.button("Reset", key="reset", width="stretch"):
         st.session_state.run = run = new_run(cfg, speed, beat)
-    st.header("Failure injection")
-    target = st.selectbox("Server", [f[0] for f in FLEET], key="target")
-    live = run.started and not run.finished
-    a, b = st.columns(2)
-    if a.button("Kill", key="kill", disabled=not live, width="stretch"):
-        st.toast(f"{target} killed at {run.now_ms / 1000:.1f} s" if run.kill(target) else f"{target} is already down")
-    if b.button("Revive", key="revive", disabled=not live, width="stretch"):
-        st.toast(f"{target} revived at {run.now_ms / 1000:.1f} s" if run.revive(target) else f"{target} is already up")
-    gloss("Kill: the server stops accepting new requests. The load balancer only notices at its next health "
-               "check (every 0.5 s), and requests already in flight on it finish.")
+# The Server picker is drawn only in the Live view, and Streamlit drops a widget's value on a run that does not draw it;
+# setting it here keeps the choice (and a beat's victim) across a visit to Compare all 3.
+st.session_state.target = st.session_state.get("target", FLEET[0][0])
 
 # A small title with the disclaimer beside it: the screen belongs to the run, not to the name.
 title, disclaimer = st.columns(2, vertical_alignment="center")
@@ -346,14 +359,14 @@ title.markdown("<h1 style='font-size:1.4rem;padding:0;margin:0'>RailDhaara load 
 gloss("A fictional Indian Railways-style booking site under a Tatkal-style rush. Simulated servers and traffic only.", disclaimer)
 # .st-key-story: the story buttons get 44 px touch targets (Streamlit's default is 40 px).
 # Wide screens: less padding round the page (4rem still clears Streamlit's header bar); a phone keeps the default.
-# .mobile-hint: on a phone the sidebar starts collapsed and the controls live in it, so say so.
+# .mobile-hint: on a phone the sidebar starts collapsed and the run controls live in it, so say so.
 st.markdown("<style>.st-key-story button{min-height:44px}"
             "@media (min-width:641px){[data-testid='stMainBlockContainer']{padding:4rem 2.5rem 1rem}}"
             # dark theme: the primary colour is near-white, so its button text must be dark (Streamlit's is white)
             + ("[data-testid='stBaseButton-primary']:not(:disabled){color:#16171A}" if DARK else "") +
             ".mobile-hint{display:none}@media (max-width:640px){.mobile-hint{display:block;padding:.5rem .75rem;"
             "border-radius:.5rem;background:rgba(128,128,128,.15);font-size:.9rem}}</style>"
-            "<div class='mobile-hint'>Controls (Start, Kill, Revive) are in the sidebar: tap <b>&raquo;</b> at the top left.</div>",
+            "<div class='mobile-hint'>Start, Pause and Reset are in the sidebar: tap <b>&raquo;</b> at the top left.</div>",
             unsafe_allow_html=True)
 with st.container(key="story"):  # the three demo beats; the columns stack full-width on a phone
     for col, (n, (name, _, victim)) in zip(st.columns(len(BEATS)), BEATS.items()):
@@ -369,6 +382,8 @@ with info.expander("What am I looking at?"):
                 "- **The question:** which rule for picking the next server (the algorithm) fails the fewest requests "
                 "and answers the fastest.\n"
                 + "".join(f"- **{name}:** {text}\n" for name, text in ALGO_GLOSS.items()) +
+                "- **Kill and Revive** (under the server list): a killed server stops accepting new requests. The load "
+                "balancer only notices at its next health check (every 0.5 s), and requests already in flight on it finish.\n"
                 "- **How to use it:** pick a story beat above, press **Start** in the sidebar, then open *Compare all 3* "
                 "to see the same traffic through all three rules.")
 st.fragment(panel, run_every=REFRESH_S if run.running else None)(run, view, algo, run.running)
